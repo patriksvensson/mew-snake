@@ -1,0 +1,163 @@
+#load "engine/ring.mew"
+
+use engine;
+use system;
+
+pub union Direction {
+    up,
+    down,
+    left,
+    right,
+}
+
+impl Direction {
+    pub static fn all() -> Direction[] {
+        return new Direction[] { .up, .down, .left, .right };
+    }
+
+    pub fn dx() -> i32 {
+        return match self {
+            .left => -1,
+            .right => 1,
+            _ => 0,
+        };
+    }
+
+    pub fn dy() -> i32 {
+        return match self {
+            .up => -1,
+            .down => 1,
+            _ => 0,
+        };
+    }
+
+    pub fn same(other: Direction) -> bool {
+        return self.dx() == other.dx() && self.dy() == other.dy();
+    }
+
+    pub fn reverses(other: Direction) -> bool {
+        return self.dx() == -other.dx() && self.dy() == -other.dy();
+    }
+
+    pub fn is_turn_from(heading: Direction) -> bool {
+        return !self.same(heading) && !self.reverses(heading);
+    }
+}
+
+[struct]
+pub type Cell {
+    pub field x: i32;
+    pub field y: i32;
+
+    pub fn next(direction: Direction) -> Cell {
+        return new Cell { x: self.x + direction.dx(), y: self.y + direction.dy() };
+    }
+
+    pub fn same(other: Cell) -> bool {
+        return self.x == other.x && self.y == other.y;
+    }
+
+    pub fn distance(other: Cell) -> i32 {
+        return Math::Abs(self.x - other.x) + Math::Abs(self.y - other.y);
+    }
+}
+
+pub type Board {
+    pub field columns: i32 = 24;
+    pub field rows: i32 = 18;
+
+    pub fn count() -> i32 {
+        return self.columns * self.rows;
+    }
+
+    pub fn contains(cell: Cell) -> bool {
+        return cell.x >= 0 && cell.x < self.columns && cell.y >= 0 && cell.y < self.rows;
+    }
+
+    pub fn index(cell: Cell) -> i32 {
+        return cell.y * self.columns + cell.x;
+    }
+
+    pub fn cell_at(index: i32) -> Cell {
+        return new Cell { x: index % self.columns, y: index / self.columns };
+    }
+}
+
+pub type Snake {
+    field board: Board;
+    field body: Ring<Cell>;
+    field occupied: bool[];
+    pub mut field trail: Cell;
+
+    pub field length: i32 {
+        get { return self.body.count(); }
+    }
+
+    pub static fn new(board: Board, head: Cell, length: i32) -> Snake {
+        let snake = new Snake {
+            board: board,
+            body: Ring<Cell>::new(board.count()),
+            occupied: new bool[board.count()],
+            trail: new Cell { x: head.x - length + 1, y: head.y },
+        };
+
+        let mut at = length - 1;
+        while at >= 0 {
+            snake.enter(new Cell { x: head.x - at, y: head.y });
+            at -= 1;
+        }
+
+        return snake;
+    }
+
+    pub fn segment(index: i32) -> Cell {
+        return self.body.get(index);
+    }
+
+    pub fn head() -> Cell {
+        return self.body.first();
+    }
+
+    pub fn tail() -> Cell {
+        return self.body.last();
+    }
+
+    pub fn occupies(cell: Cell) -> bool {
+        return self.occupied[self.board.index(cell)];
+    }
+
+    pub fn blocks(cell: Cell, growing: bool) -> bool {
+        if !self.board.contains(cell) {
+            return true;
+        }
+
+        if !self.occupies(cell) {
+            return false;
+        }
+
+        return growing || !cell.same(self.tail());
+    }
+
+    pub fn advance(next: Cell, growing: bool) {
+        let tail = self.tail();
+        self.trail = tail;
+        if !growing {
+            self.body.pop_back();
+            self.occupied[self.board.index(tail)] = false;
+        }
+
+        self.enter(next);
+    }
+
+    pub fn retreat() {
+        let head = self.body.pop_front();
+        self.occupied[self.board.index(head)] = false;
+        self.body.push_back(self.trail);
+        self.occupied[self.board.index(self.trail)] = true;
+    }
+
+    fn enter(cell: Cell) {
+        self.body.push_front(cell);
+        self.occupied[self.board.index(cell)] = true;
+    }
+}

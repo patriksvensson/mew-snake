@@ -1,0 +1,208 @@
+#load "geometry.mew"
+
+namespace engine;
+
+use system;
+
+[ffi("SDL3")]
+static external fn SDL_Init(flags: u32) -> bool;
+
+[ffi("SDL3")]
+static external fn SDL_Quit() -> void;
+
+[ffi("SDL3")]
+static external fn SDL_GL_SetAttribute(attribute: i32, value: i32) -> bool;
+
+[ffi("SDL3")]
+static external fn SDL_CreateWindow(title: string, width: i32, height: i32, flags: u64) -> i64;
+
+[ffi("SDL3")]
+static external fn SDL_DestroyWindow(window: i64) -> void;
+
+[ffi("SDL3")]
+static external fn SDL_GL_CreateContext(window: i64) -> i64;
+
+[ffi("SDL3")]
+static external fn SDL_GL_DestroyContext(context: i64) -> bool;
+
+[ffi("SDL3")]
+static external fn SDL_GL_SetSwapInterval(interval: i32) -> bool;
+
+[ffi("SDL3")]
+static external fn SDL_GL_SwapWindow(window: i64) -> bool;
+
+[ffi("SDL3")]
+static external fn SDL_GetWindowSizeInPixels(window: i64, width: i32[], height: i32[]) -> bool;
+
+[ffi("SDL3")]
+static external fn SDL_PollEvent(event: u8[]) -> bool;
+
+[ffi("SDL3")]
+static external fn SDL_GetTicks() -> u64;
+
+pub union Key {
+    up,
+    down,
+    left,
+    right,
+    w,
+    a,
+    s,
+    d,
+    p,
+    space,
+    enter,
+    escape,
+    other,
+}
+
+impl Key {
+    pub static fn from_scancode(scancode: u32) -> Key {
+        return match scancode {
+            82 => .up,
+            81 => .down,
+            80 => .left,
+            79 => .right,
+            26 => .w,
+            4 => .a,
+            22 => .s,
+            7 => .d,
+            19 => .p,
+            44 => .space,
+            40 => .enter,
+            41 => .escape,
+            _ => .other,
+        };
+    }
+}
+
+pub union Event {
+    quit,
+    focus_lost,
+    key(Key),
+    other,
+}
+
+impl Event {
+    pub static fn decode(bytes: u8[]) -> Event {
+        let quit: u32 = 0x100;
+        let focus_lost: u32 = 0x20F;
+        let key_down: u32 = 0x300;
+
+        let kind = BitConverter::ToUInt32(bytes, 0);
+        if kind == quit {
+            return .quit;
+        }
+
+        if kind == focus_lost {
+            return .focus_lost;
+        }
+
+        let repeated = bytes[37] != 0;
+        if kind == key_down && !repeated {
+            return .key(Key::from_scancode(BitConverter::ToUInt32(bytes, 24)));
+        }
+
+        return .other;
+    }
+}
+
+pub type Clock {
+    mut field last: u64;
+
+    pub static fn start() -> Clock {
+        return new Clock { last: SDL_GetTicks() };
+    }
+
+    pub fn tick(limit: f64 = 250.0) -> f64 {
+        let now = SDL_GetTicks();
+        let elapsed = (now - self.last) as f64;
+        self.last = now;
+        return Math::Min(elapsed, limit);
+    }
+}
+
+pub type Window {
+    field handle: i64;
+    field context: i64;
+    field event: u8[];
+    field pixel_width: i32[];
+    field pixel_height: i32[];
+    pub field size: Size;
+    pub field samples: i32;
+
+    pub static fn open(title: string, size: Size, samples: i32 = 4) -> Result<Window, string> {
+        let video: u32 = 0x20;
+        if !SDL_Init(video) {
+            return .err("SDL could not start its video subsystem.");
+        }
+
+        let depth_size = 6;
+        let stencil_size = 7;
+        let multisample_buffers = 13;
+        let multisample_samples = 14;
+        let context_major_version = 17;
+        let context_minor_version = 18;
+        let context_flags = 19;
+        let context_profile_mask = 20;
+        let forward_compatible = 2;
+        let core_profile = 1;
+        SDL_GL_SetAttribute(context_major_version, 4);
+        SDL_GL_SetAttribute(context_minor_version, 1);
+        SDL_GL_SetAttribute(context_profile_mask, core_profile);
+        SDL_GL_SetAttribute(context_flags, forward_compatible);
+        SDL_GL_SetAttribute(depth_size, 24);
+        SDL_GL_SetAttribute(stencil_size, 8);
+        SDL_GL_SetAttribute(multisample_buffers, 1);
+        SDL_GL_SetAttribute(multisample_samples, samples);
+
+        let opengl: u64 = 0x2;
+        let high_pixel_density: u64 = 0x2000;
+        let handle = SDL_CreateWindow(title, size.width, size.height, opengl + high_pixel_density);
+        if handle == 0 {
+            SDL_Quit();
+            return .err("SDL could not open a window.");
+        }
+
+        let context = SDL_GL_CreateContext(handle);
+        if context == 0 {
+            SDL_DestroyWindow(handle);
+            SDL_Quit();
+            return .err("SDL could not create an OpenGL context.");
+        }
+
+        SDL_GL_SetSwapInterval(1);
+        return .ok(new Window {
+            handle: handle,
+            context: context,
+            event: new u8[128],
+            pixel_width: new i32[1],
+            pixel_height: new i32[1],
+            size: size,
+            samples: samples,
+        });
+    }
+
+    pub fn poll() -> Option<Event> {
+        if SDL_PollEvent(self.event) {
+            return .some(Event::decode(self.event));
+        }
+
+        return .none;
+    }
+
+    pub fn pixels() -> Size {
+        SDL_GetWindowSizeInPixels(self.handle, self.pixel_width, self.pixel_height);
+        return new Size { width: self.pixel_width[0], height: self.pixel_height[0] };
+    }
+
+    pub fn present() {
+        SDL_GL_SwapWindow(self.handle);
+    }
+
+    pub fn close() {
+        SDL_GL_DestroyContext(self.context);
+        SDL_DestroyWindow(self.handle);
+        SDL_Quit();
+    }
+}

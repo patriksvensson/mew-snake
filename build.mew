@@ -1,0 +1,107 @@
+#load "build/clang.mew"
+#load "build/files.mew"
+
+use std.build;
+use std.cli;
+use std.collections;
+use std.io;
+use std.process;
+use system.runtime.interopservices;
+
+pub type Game {
+    pub field debug: bool;
+    pub field lint: bool;
+}
+
+setup(args: string[]) -> Game {
+    let cli = Cli::new(args);
+    return new Game { debug: cli.flag("--debug"), lint: cli.flag("--lint") };
+}
+
+[retries(2)]
+task sokol
+    out gfx = file(".deps/sokol/sokol_gfx.h")
+    out log = file(".deps/sokol/sokol_log.h")
+    out gl = file(".deps/sokol/util/sokol_gl.h")
+    out text = file(".deps/sokol/util/sokol_debugtext.h")
+{
+    let commit = "401f21f8b7039258c35fef75c11d9a8a0e616771";
+    git("init", "--quiet", ".deps/sokol")?;
+    git("-C", ".deps/sokol", "fetch", "--quiet", "--depth", "1", "https://github.com/floooh/sokol", commit)?;
+    git("-C", ".deps/sokol", "checkout", "--quiet", "--force", "FETCH_HEAD")?;
+}
+
+task optimization(ctx: Game) -> string {
+    if ctx.debug {
+        return "-O0";
+    }
+
+    return "-O2";
+}
+
+rule compile(source: File in glob("native/*.c")) : sokol, optimization
+    out object = file($".build/native/{source.stem}.o")
+    out dependencies = file($".build/native/{source.stem}.d")
+{
+    shell(
+        "clang", "-c", optimization, "-g", "-fPIC", "-std=c11",
+        "-DSOKOL_GLCORE", "-I.deps/sokol",
+        "-MMD", "-MF", dependencies.path,
+        "-o", object.path, source.path)?;
+    discovered(read_headers(dependencies)?);
+}
+
+task library : compile
+    out dylib = file(".build/native/libsokol.dylib")
+{
+    let arguments = List<string>::new();
+    arguments.add("-dynamiclib");
+    arguments.add("-o");
+    arguments.add(dylib.path);
+    for unit in compile {
+        arguments.add(unit.object.path);
+    }
+
+    arguments.add("-framework");
+    arguments.add("OpenGL");
+    shell("clang", arguments.to_array())?;
+}
+
+task native : library
+    in sdl = file(env("SDL3").value.unwrap_or("/opt/homebrew/lib/libSDL3.dylib"))
+    out sokol_library = file("game/.mew/libsokol.dylib")
+    out sdl_library = file("game/.mew/libSDL3.dylib")
+{
+    library.dylib.copy_to(sokol_library);
+    sdl.copy_to(sdl_library);
+}
+
+task format(ctx: Game)
+    in sources = glob("game/**/*.mew", "build.mew", "build/*.mew")
+    when ctx.lint
+{
+    shell("mew", "fmt", "--check", ".")?;
+}
+
+task game : native, format
+    in sources = glob("game/**/*.mew")
+    out program = file("game/.mew/main.dll")
+{
+    shell("mew", "compile", "game/main.mew")?;
+}
+
+task play : game {
+    shell("dotnet", game.program.path)?;
+}
+
+task platform -> string {
+    return RuntimeInformation::RuntimeIdentifier;
+}
+
+task package : native, game, platform
+    out archive = file($".artifacts/mew-snake-{platform}.zip")
+{
+    compress(directory("game/.mew"), archive)?;
+}
+
+task default : game { }

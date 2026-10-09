@@ -1,0 +1,293 @@
+#load "engine/color.mew"
+#load "engine/effects.mew"
+#load "engine/geometry.mew"
+#load "engine/sokol.mew"
+#load "game.mew"
+#load "viewport.mew"
+
+use engine;
+use system;
+
+pub type Palette {
+    pub field background: Color;
+    pub field frame: Color;
+    pub field tile: Color;
+    pub field tile_alternate: Color;
+    pub field head: Color;
+    pub field tail: Color;
+    pub field eye: Color;
+    pub field pupil: Color;
+    pub field food: Color;
+    pub field shine: Color;
+    pub field leaf: Color;
+    pub field crash: Color;
+    pub field text: Color;
+    pub field dim: Color;
+    pub field accent: Color;
+    pub field shade: Color;
+    pub field deep_shade: Color;
+    pub field shadow: Color;
+
+    pub static fn new() -> Palette {
+        return new Palette {
+            background: Color::rgb(13, 16, 22),
+            frame: Color::rgb(38, 46, 60),
+            tile: Color::rgb(22, 27, 36),
+            tile_alternate: Color::rgb(26, 32, 42),
+            head: Color::rgb(150, 245, 165),
+            tail: Color::rgb(30, 130, 125),
+            eye: Color::rgb(245, 247, 250),
+            pupil: Color::rgb(13, 16, 22),
+            food: Color::rgb(255, 92, 122),
+            shine: Color::rgb(255, 214, 224),
+            leaf: Color::rgb(120, 210, 110),
+            crash: Color::rgb(255, 86, 86),
+            text: Color::rgb(232, 236, 241),
+            dim: Color::rgb(128, 138, 156),
+            accent: Color::rgb(255, 209, 102),
+            shade: new Color { r: 8, g: 10, b: 14, a: 175 },
+            deep_shade: new Color { r: 8, g: 10, b: 14, a: 220 },
+            shadow: new Color { r: 0, g: 0, b: 0, a: 160 },
+        };
+    }
+}
+
+pub type Scene {
+    field painter: Painter;
+    field viewport: Viewport;
+    field palette: Palette;
+    field sparks: Sparks;
+    field points: Point[];
+    field colors: Color[];
+    mut field clock: f64;
+    mut field shake: f32;
+
+    pub static fn new(painter: Painter, viewport: Viewport) -> Scene {
+        let points = viewport.board.count() + 1;
+        return new Scene {
+            painter: painter,
+            viewport: viewport,
+            palette: Palette::new(),
+            sparks: Sparks::new(512),
+            points: new Point[points],
+            colors: new Color[points],
+            clock: 0.0,
+            shake: 0.0,
+        };
+    }
+
+    pub fn draw(game: Game, milliseconds: f64) {
+        self.react(game, milliseconds);
+
+        let shake = self.shake * self.shake * 9.0;
+        let dx = (Math::Sin(self.clock * 0.09) * shake) as f32;
+        let dy = (Math::Cos(self.clock * 0.11) * shake) as f32;
+
+        self.painter.begin(self.palette.background);
+        self.painter.shift(dx, dy);
+        self.draw_board();
+        self.draw_food(game);
+        self.draw_snake(game);
+        self.sparks.draw(self.painter);
+        self.painter.unshift();
+        self.draw_hud(game);
+        self.draw_overlay(game);
+        self.painter.end();
+    }
+
+    fn react(game: Game, milliseconds: f64) {
+        self.clock += milliseconds;
+        for moment in game.moments {
+            match moment {
+                .ate(cell) => {
+                    let center = self.viewport.center(cell);
+                    self.sparks.burst(center, self.palette.food, count: 28, speed: 220.0);
+                    self.sparks.burst(center, self.palette.shine, count: 12, speed: 140.0);
+                },
+                .crashed(cell) => {
+                    self.sparks.burst(self.viewport.center(cell), self.palette.crash, count: 40, speed: 260.0);
+                    self.shake = 1.0;
+                },
+            }
+        }
+
+        self.shake = Math::Max(0.0, self.shake - milliseconds / 450.0) as f32;
+        self.sparks.update(milliseconds);
+    }
+
+    fn draw_board() {
+        let viewport = self.viewport;
+        self.painter.rect(viewport.margin - 5.0, viewport.top - 5.0, viewport.grid_width + 10.0, viewport.grid_height + 10.0, self.palette.frame);
+        self.painter.checker(viewport.margin, viewport.top, viewport.board.columns, viewport.board.rows, viewport.cell, self.palette.tile, self.palette.tile_alternate);
+    }
+
+    fn draw_food(game: Game) {
+        let viewport = self.viewport;
+        let center = viewport.center(game.state.food);
+        let pulse = (1.0 + Math::Sin(self.clock * 0.008) * 0.08) as f32;
+        let radius = viewport.cell * 0.34 * pulse;
+
+        self.painter.circle(center, viewport.cell * 0.75, self.palette.food.fade(0.10));
+        self.painter.circle(center, viewport.cell * 0.55, self.palette.food.fade(0.16));
+        self.painter.circle(center.offset(0.0, 2.0), radius, self.palette.shadow.fade(0.5));
+        self.painter.circle(center, radius, self.palette.food);
+        self.painter.circle(center.offset(-radius * 0.35, -radius * 0.35), radius * 0.3, self.palette.shine.fade(0.85));
+        self.painter.circle(center.offset(radius * 0.35, -radius * 1.05), radius * 0.32, self.palette.leaf);
+    }
+
+    fn draw_snake(game: Game) {
+        let viewport = self.viewport;
+        let snake = game.state.snake;
+        let t = self.ease_progress(game);
+        let count = snake.length + 1;
+        let points = self.points;
+        let colors = self.colors;
+
+        points[0] = viewport.center(snake.segment(1)).lerp(viewport.center(snake.head()), t);
+        for at in 1..snake.length {
+            points[at] = viewport.center(snake.segment(at));
+        }
+
+        points[count - 1] = viewport.center(snake.trail).lerp(viewport.center(snake.tail()), t);
+
+        for at in 0..count {
+            colors[at] = self.body(game, at, count);
+        }
+
+        let radius = viewport.cell * 0.36;
+        let mut at = count - 1;
+        while at > 0 {
+            self.painter.band(points[at], points[at - 1], radius, colors[at], colors[at - 1]);
+            at -= 1;
+        }
+
+        for at in 1..count {
+            if at == count - 1 || self.is_corner(at) {
+                self.painter.circle(points[at], radius, colors[at]);
+            }
+        }
+
+        self.draw_head(game, points[0], radius * 1.2, colors[0]);
+    }
+
+    fn ease_progress(game: Game) -> f32 {
+        if let .over = game.phase {
+            return 1.0;
+        }
+
+        let linear = game.state.progress();
+        return 1.0 - (1.0 - linear) * (1.0 - linear);
+    }
+
+    fn is_corner(at: i32) -> bool {
+        let before = self.points[at - 1];
+        let here = self.points[at];
+        let after = self.points[at + 1];
+        let cross = (before.x - here.x) * (after.y - here.y) - (before.y - here.y) * (after.x - here.x);
+        return Math::Abs(cross) > 0.01;
+    }
+
+    fn body(game: Game, at: i32, count: i32) -> Color {
+        let color = self.palette.head.mix(self.palette.tail, (at as f32) / count);
+        if let .over = game.phase {
+            return color.mix(self.palette.crash, self.shake * 0.8);
+        }
+
+        return color;
+    }
+
+    fn draw_head(game: Game, center: Point, radius: f32, color: Color) {
+        let forward_x = game.state.heading.dx() * radius;
+        let forward_y = game.state.heading.dy() * radius;
+        let side_x = -forward_y;
+        let side_y = forward_x;
+
+        self.painter.circle(center, radius, color);
+        for side in new f32[] { -1.0, 1.0 } {
+            let eye = center.offset(forward_x * 0.3 + side_x * 0.45 * side, forward_y * 0.3 + side_y * 0.45 * side);
+            self.painter.circle(eye, radius * 0.34, self.palette.eye);
+            self.painter.circle(eye.offset(forward_x * 0.1, forward_y * 0.1), radius * 0.18, self.palette.pupil);
+        }
+    }
+
+    fn draw_hud(game: Game) {
+        let viewport = self.viewport;
+        let y = 24.0;
+        let best = $"BEST {game.high_score}";
+        if !game.is_showing_title() {
+            self.shadowed(.medium, viewport.margin, y, $"SCORE {game.state.score}", self.palette.text);
+        }
+
+        self.shadowed(.medium, viewport.width - viewport.margin - self.painter.measure(.medium, best), y, best, self.palette.dim);
+    }
+
+    fn draw_overlay(game: Game) {
+        let viewport = self.viewport;
+        let center = viewport.width / 2;
+        let middle = viewport.top + viewport.grid_height / 2;
+        let blink = (0.6 + Math::Sin(self.clock * 0.006) * 0.4) as f32;
+
+        match game.phase {
+            .playing => { },
+            .title => {
+                self.shade(self.palette.deep_shade);
+                self.shadowed_centered(.large, center, viewport.top + 52.0, "MEW", self.palette.head);
+                self.shadowed_centered(.large, center, viewport.top + 112.0, "SNAKE", self.palette.text);
+                self.shadowed_centered(.medium, center, middle - 4.0, "PRESS SPACE", self.palette.accent.fade(blink));
+                self.shadowed_lines(.small, center, middle + 52.0, self.palette.dim, "ARROWS OR WASD TO STEER", "P TO PAUSE, ESC TO QUIT");
+                self.draw_credits(center, viewport.bottom - 80.0);
+            },
+            .paused => {
+                self.shade(self.palette.deep_shade);
+                self.shadowed_centered(.large, center, middle - 50.0, "PAUSED", self.palette.text);
+                self.shadowed_centered(.medium, center, middle + 40.0, "PRESS SPACE", self.palette.accent.fade(blink));
+            },
+            .over => {
+                self.shade(self.palette.shade);
+                let mut title = "GAME OVER";
+                if game.state.won {
+                    title = "YOU WIN";
+                }
+
+                self.shadowed_centered(.large, center, middle - 90.0, title, self.palette.crash);
+                self.shadowed_centered(.medium, center, middle, $"SCORE {game.state.score}", self.palette.text);
+                if game.state.record {
+                    self.shadowed_centered(.small, center, middle + 40.0, "NEW BEST!", self.palette.accent);
+                }
+
+                self.shadowed_centered(.small, center, middle + 90.0, "PRESS SPACE TO PLAY AGAIN", self.palette.accent.fade(blink));
+            },
+        }
+    }
+
+    fn draw_credits(center: f32, top: f32) {
+        let written = "WRITTEN IN ";
+        let left = center - self.painter.measure(.small, $"{written}MEW") / 2;
+        let color = self.palette.dim.fade(0.7);
+        self.shadowed_centered(.small, center, top + 20.0, "CREATED BY PATRIK SVENSSON", color);
+        self.shadowed(.small, left, top + 44.0, written, color);
+        self.shadowed(.small, left + self.painter.measure(.small, written), top + 44.0, "MEW", self.palette.head.fade(0.85));
+    }
+
+    fn shade(color: Color) {
+        let viewport = self.viewport;
+        self.painter.rect(viewport.margin, viewport.top, viewport.grid_width, viewport.grid_height, color);
+    }
+
+    fn shadowed(size: TextSize, x: f32, y: f32, text: string, color: Color) {
+        let offset = size.scale();
+        self.painter.write(size, x + offset, y + offset, text, self.palette.shadow.fade(color.a.to_unit()));
+        self.painter.write(size, x, y, text, color);
+    }
+
+    fn shadowed_centered(size: TextSize, center: f32, y: f32, text: string, color: Color) {
+        self.shadowed(size, center - self.painter.measure(size, text) / 2, y, text, color);
+    }
+
+    fn shadowed_lines(size: TextSize, center: f32, top: f32, color: Color, lines: ...string) {
+        let height = 12 * size.scale();
+        for at in 0..lines.count {
+            self.shadowed_centered(size, center, top + at * height, lines[at], color);
+        }
+    }
+}

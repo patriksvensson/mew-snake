@@ -1,0 +1,46 @@
+#load "engine/ring.mew"
+#load "game_state.mew"
+#load "snake.mew"
+
+use engine;
+
+pub interface Pilot {
+    fn steer(state: GameState) -> Direction;
+}
+
+pub type Player {
+    field turns: Ring<Direction>;
+
+    pub static fn new() -> Player {
+        return new Player { turns: Ring<Direction>::new(3) };
+    }
+
+    pub fn queue(direction: Direction, heading: Direction) {
+        if self.turns.is_full() {
+            return;
+        }
+
+        let mut last = heading;
+        if !self.turns.is_empty() {
+            last = self.turns.last();
+        }
+
+        if direction.is_turn_from(last) {
+            self.turns.push_back(direction);
+        }
+    }
+
+    pub fn clear() {
+        self.turns.clear();
+    }
+}
+
+impl Pilot for Player {
+    pub fn steer(state: GameState) -> Direction {
+        if self.turns.is_empty() {
+            return state.heading;
+        }
+
+        return self.turns.pop_front();
+    }
+}

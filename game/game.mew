@@ -1,0 +1,206 @@
+#load "autopilot.mew"
+#load "pilot.mew"
+#load "game_state.mew"
+#load "high_score.mew"
+#load "input.mew"
+#load "snake.mew"
+
+use std.collections;
+use system;
+
+pub union Phase {
+    title,
+    playing,
+    paused,
+    over,
+}
+
+pub union Moment {
+    ate(Cell),
+    crashed(Cell),
+}
+
+pub type Game {
+    pub field board: Board;
+    pub field high_score: HighScore;
+    pub field moments: List<Moment>;
+    field autopilot: Autopilot;
+    field player: Player;
+    field random: Random;
+    pub mut field state: GameState;
+    pub mut field phase: Phase;
+    mut field pilot: Pilot;
+
+    pub static fn new(board: Board, high_score: HighScore) -> Game {
+        let random = new Random { };
+        let autopilot = Autopilot::new(board);
+        return new Game {
+            board: board,
+            high_score: high_score,
+            moments: List<Moment>::new(),
+            autopilot: autopilot,
+            player: Player::new(),
+            random: random,
+            state: GameState::new(board, random),
+            phase: .title,
+            pilot: autopilot,
+        };
+    }
+
+    pub fn handle(command: Command) -> bool {
+        match command {
+            .quit => {
+                return false;
+            },
+            .steer(direction) => {
+                if self.is_playing() && !self.redo_step(direction) {
+                    self.player.queue(direction, self.state.heading);
+                }
+            },
+            .confirm => {
+                match self.phase {
+                    .title | .over => {
+                        self.reset(.playing);
+                    },
+                    _ => {
+                        self.toggle_pause();
+                    },
+                }
+            },
+            .pause => {
+                self.toggle_pause();
+            },
+            .suspend => {
+                if self.is_playing() {
+                    self.phase = .paused;
+                }
+            },
+        }
+
+        return true;
+    }
+
+    pub fn update(milliseconds: f64) {
+        self.moments.clear();
+        if !self.is_moving() {
+            return;
+        }
+
+        self.state.elapsed += milliseconds;
+        while self.state.elapsed >= self.state.interval && self.is_moving() {
+            self.state.elapsed -= self.state.interval;
+            self.step();
+        }
+    }
+
+    pub fn is_playing() -> bool {
+        return match self.phase {
+            .playing => true,
+            _ => false,
+        };
+    }
+
+    pub fn is_showing_title() -> bool {
+        return match self.phase {
+            .title => true,
+            _ => false,
+        };
+    }
+
+    fn is_moving() -> bool {
+        return self.is_playing() || self.is_showing_title();
+    }
+
+    fn toggle_pause() {
+        match self.phase {
+            .playing => {
+                self.phase = .paused;
+            },
+            .paused => {
+                self.phase = .playing;
+            },
+            _ => { },
+        }
+    }
+
+    fn reset(phase: Phase) {
+        self.state = GameState::new(self.board, self.random);
+        self.player.clear();
+        self.phase = phase;
+        if let .title = phase {
+            self.pilot = self.autopilot;
+        } else {
+            self.pilot = self.player;
+        }
+    }
+
+    fn step() {
+        let state = self.state;
+        let before = state.heading;
+        state.heading = self.pilot.steer(state);
+        let moved = self.move_head();
+        state.redoable = moved && state.heading.same(before);
+    }
+
+    fn redo_step(direction: Direction) -> bool {
+        let state = self.state;
+        if !state.can_redo(direction) {
+            return false;
+        }
+
+        state.snake.retreat();
+        state.heading = direction;
+        state.redoable = false;
+        self.move_head();
+        return true;
+    }
+
+    fn move_head() -> bool {
+        let state = self.state;
+        let next = state.snake.head().next(state.heading);
+        if state.blocks(next) {
+            self.crash();
+            return false;
+        }
+
+        let growing = next.same(state.food);
+        state.snake.advance(next, growing);
+        if growing {
+            self.eat();
+        }
+
+        return !growing;
+    }
+
+    fn eat() {
+        let state = self.state;
+        self.moments.add(.ate(state.food));
+        if !self.is_showing_title() {
+            state.score += 1;
+            state.interval = Math::Max(70.0, state.interval - 3.0);
+        }
+
+        if !state.place_food() {
+            state.won = true;
+            self.finish();
+        }
+    }
+
+    fn crash() {
+        if !self.is_showing_title() {
+            self.moments.add(.crashed(self.state.snake.head()));
+        }
+
+        self.finish();
+    }
+
+    fn finish() {
+        if self.is_showing_title() {
+            self.reset(.title);
+            return;
+        }
+
+        self.state.record = self.high_score.submit(self.state.score);
+        self.phase = .over;
+    }
+}

@@ -1,0 +1,21 @@
+namespace engine;
+
+[struct]
+pub type Size {
+    pub field width: i32;
+    pub field height: i32;
+}
+
+[struct]
+pub type Point {
+    pub field x: f32;
+    pub field y: f32;
+
+    pub fn offset(dx: f32, dy: f32) -> Point {
+        return new Point { x: self.x + dx, y: self.y + dy };
+    }
+
+    pub fn lerp(to: Point, amount: f32) -> Point {
+        return new Point { x: self.x + (to.x - self.x) * amount, y: self.y + (to.y - self.y) * amount };
+    }
+}

@@ -1,0 +1,219 @@
+#load "color.mew"
+#load "geometry.mew"
+#load "sdl.mew"
+
+namespace engine;
+
+use system;
+
+[ffi("sokol")]
+static external fn glue_setup(samples: i32) -> void;
+
+[ffi("sokol")]
+static external fn glue_begin(width: i32, height: i32, r: f32, g: f32, b: f32) -> void;
+
+[ffi("sokol")]
+static external fn glue_text(size: i32) -> void;
+
+[ffi("sokol")]
+static external fn glue_end() -> void;
+
+[ffi("sokol")]
+static external fn glue_shutdown() -> void;
+
+[ffi("sokol")]
+static external fn sgl_matrix_mode_projection() -> void;
+
+[ffi("sokol")]
+static external fn sgl_matrix_mode_modelview() -> void;
+
+[ffi("sokol")]
+static external fn sgl_ortho(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) -> void;
+
+[ffi("sokol")]
+static external fn sgl_push_matrix() -> void;
+
+[ffi("sokol")]
+static external fn sgl_pop_matrix() -> void;
+
+[ffi("sokol")]
+static external fn sgl_translate(x: f32, y: f32, z: f32) -> void;
+
+[ffi("sokol")]
+static external fn sgl_begin_triangles() -> void;
+
+[ffi("sokol")]
+static external fn sgl_begin_quads() -> void;
+
+[ffi("sokol")]
+static external fn sgl_end() -> void;
+
+[ffi("sokol")]
+static external fn sgl_c4b(r: u8, g: u8, b: u8, a: u8) -> void;
+
+[ffi("sokol")]
+static external fn sgl_v2f(x: f32, y: f32) -> void;
+
+[ffi("sokol")]
+static external fn sgl_v2f_c4b(x: f32, y: f32, r: u8, g: u8, b: u8, a: u8) -> void;
+
+[ffi("sokol")]
+static external fn sdtx_canvas(width: f32, height: f32) -> void;
+
+[ffi("sokol")]
+static external fn sdtx_pos(x: f32, y: f32) -> void;
+
+[ffi("sokol")]
+static external fn sdtx_color4b(r: u8, g: u8, b: u8, a: u8) -> void;
+
+[ffi("sokol")]
+static external fn sdtx_puts(text: string) -> void;
+
+pub union TextSize {
+    small,
+    medium,
+    large,
+}
+
+impl TextSize {
+    pub fn context() -> i32 {
+        return match self {
+            .small => 0,
+            .medium => 1,
+            .large => 2,
+        };
+    }
+
+    pub fn scale() -> f32 {
+        return match self {
+            .small => 2.0,
+            .medium => 3.0,
+            .large => 6.0,
+        };
+    }
+}
+
+pub type Painter {
+    field window: Window;
+    field cosines: f32[];
+    field sines: f32[];
+
+    pub static fn new(window: Window, segments: i32 = 24) -> Painter {
+        glue_setup(window.samples);
+        for text_size in new TextSize[] { .small, .medium, .large } {
+            glue_text(text_size.context());
+            sdtx_canvas(window.size.width / text_size.scale(), window.size.height / text_size.scale());
+        }
+
+        let turn = 6.283185307179586;
+        let cosines = new f32[segments];
+        let sines = new f32[segments];
+        for at in 0..segments {
+            let angle = turn * at / segments;
+            cosines[at] = Math::Cos(angle) as f32;
+            sines[at] = Math::Sin(angle) as f32;
+        }
+
+        return new Painter { window: window, cosines: cosines, sines: sines };
+    }
+
+    pub fn begin(background: Color) {
+        let pixels = self.window.pixels();
+        glue_begin(pixels.width, pixels.height, background.r.to_unit(), background.g.to_unit(), background.b.to_unit());
+        sgl_matrix_mode_projection();
+        sgl_ortho(0.0, self.window.size.width, self.window.size.height, 0.0, -1.0, 1.0);
+        sgl_matrix_mode_modelview();
+    }
+
+    pub fn end() {
+        glue_end();
+        self.window.present();
+    }
+
+    pub fn shutdown() {
+        glue_shutdown();
+    }
+
+    pub fn shift(x: f32, y: f32) {
+        sgl_push_matrix();
+        sgl_translate(x, y, 0.0);
+    }
+
+    pub fn unshift() {
+        sgl_pop_matrix();
+    }
+
+    pub fn rect(x: f32, y: f32, width: f32, height: f32, color: Color) {
+        sgl_begin_quads();
+        sgl_c4b(color.r, color.g, color.b, color.a);
+        sgl_v2f(x, y);
+        sgl_v2f(x + width, y);
+        sgl_v2f(x + width, y + height);
+        sgl_v2f(x, y + height);
+        sgl_end();
+    }
+
+    pub fn checker(x: f32, y: f32, columns: i32, rows: i32, size: f32, color: Color, alternate: Color) {
+        self.rect(x, y, columns * size, rows * size, color);
+        sgl_begin_quads();
+        sgl_c4b(alternate.r, alternate.g, alternate.b, alternate.a);
+        for row in 0..rows {
+            for column in 0..columns {
+                if (row + column) % 2 == 0 {
+                    let left = x + column * size;
+                    let top = y + row * size;
+                    sgl_v2f(left, top);
+                    sgl_v2f(left + size, top);
+                    sgl_v2f(left + size, top + size);
+                    sgl_v2f(left, top + size);
+                }
+            }
+        }
+
+        sgl_end();
+    }
+
+    pub fn circle(center: Point, radius: f32, color: Color) {
+        let count = self.cosines.count;
+        sgl_begin_triangles();
+        sgl_c4b(color.r, color.g, color.b, color.a);
+        for at in 0..count {
+            let next = (at + 1) % count;
+            sgl_v2f(center.x, center.y);
+            sgl_v2f(center.x + self.cosines[at] * radius, center.y + self.sines[at] * radius);
+            sgl_v2f(center.x + self.cosines[next] * radius, center.y + self.sines[next] * radius);
+        }
+
+        sgl_end();
+    }
+
+    pub fn band(from: Point, to: Point, radius: f32, from_color: Color, to_color: Color) {
+        let dx = to.x - from.x;
+        let dy = to.y - from.y;
+        let length = Math::Sqrt(dx * dx + dy * dy) as f32;
+        if length < 0.001 {
+            return;
+        }
+
+        let nx = -dy / length * radius;
+        let ny = dx / length * radius;
+        sgl_begin_quads();
+        sgl_v2f_c4b(from.x + nx, from.y + ny, from_color.r, from_color.g, from_color.b, from_color.a);
+        sgl_v2f_c4b(to.x + nx, to.y + ny, to_color.r, to_color.g, to_color.b, to_color.a);
+        sgl_v2f_c4b(to.x - nx, to.y - ny, to_color.r, to_color.g, to_color.b, to_color.a);
+        sgl_v2f_c4b(from.x - nx, from.y - ny, from_color.r, from_color.g, from_color.b, from_color.a);
+        sgl_end();
+    }
+
+    pub fn measure(size: TextSize, text: string) -> f32 {
+        return text.length() * 8 * size.scale();
+    }
+
+    pub fn write(size: TextSize, x: f32, y: f32, text: string, color: Color) {
+        let scale = size.scale();
+        glue_text(size.context());
+        sdtx_pos(x / (8 * scale), y / (8 * scale));
+        sdtx_color4b(color.r, color.g, color.b, color.a);
+        sdtx_puts(text);
+    }
+}

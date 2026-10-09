@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Continuous Integration
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build:
+    name: Build
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v6
+
+      - name: Install Mew
+        shell: bash
+        run: |
+          dotnet tool install --global Mew --prerelease
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Install SDL 3
+        shell: bash
+        run: brew install sdl3
+
+      - name: Build
+        shell: bash
+        run: mew build package --lint

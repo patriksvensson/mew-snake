@@ -1,0 +1,71 @@
+#load "engine/sdl.mew"
+#load "snake.mew"
+
+use engine;
+
+pub union Command {
+    steer(Direction),
+    confirm,
+    pause,
+    suspend,
+    quit,
+}
+
+pub type Input {
+    field window: Window;
+    mut field command: Option<Command>;
+
+    pub static fn new(window: Window) -> Input {
+        return new Input { window: window, command: .none };
+    }
+
+    static fn read(event: Event) -> Option<Command> {
+        return match event {
+            .quit => .some(.quit),
+            .focus_lost => .some(.suspend),
+            .key(key) => read_key(key),
+            .other => .none,
+        };
+    }
+
+    static fn read_key(key: Key) -> Option<Command> {
+        return match key {
+            .up | .w => .some(.steer(.up)),
+            .down | .s => .some(.steer(.down)),
+            .left | .a => .some(.steer(.left)),
+            .right | .d => .some(.steer(.right)),
+            .space | .enter => .some(.confirm),
+            .p => .some(.pause),
+            .escape => .some(.quit),
+            .other => .none,
+        };
+    }
+}
+
+impl Enumerable<Command> for Input {
+    pub fn iter() -> Enumerator<Command> {
+        return self;
+    }
+}
+
+impl Enumerator<Command> for Input {
+    pub fn next() -> bool {
+        loop {
+            match self.window.poll() {
+                .none => {
+                    return false;
+                },
+                .some(event) => {
+                    self.command = read(event);
+                    if self.command.is_some() {
+                        return true;
+                    }
+                },
+            }
+        }
+    }
+
+    pub fn current() -> Command {
+        return self.command.unwrap();
+    }
+}

@@ -1,0 +1,81 @@
+namespace engine;
+
+pub type Ring<T> {
+    field items: T[];
+    mut field start: i32;
+    mut field size: i32;
+
+    pub static fn new(capacity: i32) -> Ring<T> {
+        return new Ring<T> { items: new T[capacity], start: 0, size: 0 };
+    }
+
+    pub fn count() -> i32 {
+        return self.size;
+    }
+
+    pub fn is_empty() -> bool {
+        return self.size == 0;
+    }
+
+    pub fn is_full() -> bool {
+        return self.size == self.items.count;
+    }
+
+    pub fn get(index: i32) -> T {
+        if index < 0 || index >= self.size {
+            panic($"Index {index} is outside a ring holding {self.size}.");
+        }
+
+        return self.items[self.wrap(self.start + index)];
+    }
+
+    pub fn first() -> T {
+        return self.get(0);
+    }
+
+    pub fn last() -> T {
+        return self.get(self.size - 1);
+    }
+
+    pub fn push_front(item: T) {
+        self.check_room();
+        self.start = self.wrap(self.start - 1);
+        self.items[self.start] = item;
+        self.size += 1;
+    }
+
+    pub fn push_back(item: T) {
+        self.check_room();
+        self.items[self.wrap(self.start + self.size)] = item;
+        self.size += 1;
+    }
+
+    pub fn pop_front() -> T {
+        let item = self.first();
+        self.start = self.wrap(self.start + 1);
+        self.size -= 1;
+        return item;
+    }
+
+    pub fn pop_back() -> T {
+        let item = self.last();
+        self.size -= 1;
+        return item;
+    }
+
+    pub fn clear() {
+        self.start = 0;
+        self.size = 0;
+    }
+
+    fn wrap(index: i32) -> i32 {
+        let capacity = self.items.count;
+        return (index % capacity + capacity) % capacity;
+    }
+
+    fn check_room() {
+        if self.is_full() {
+            panic($"A ring holding {self.items.count} is full.");
+        }
+    }
+}

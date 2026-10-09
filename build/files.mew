@@ -1,0 +1,7 @@
+use std.io;
+
+impl File {
+    pub fn copy_to(target: File) {
+        system.io.File::Copy(self.path, target.path, true);
+    }
+}

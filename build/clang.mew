@@ -1,0 +1,24 @@
+use std.collections;
+use std.io;
+
+pub fn read_headers(dependencies: File) -> Result<string[], string> {
+    let headers = List<string>::new();
+    for line in read_text(dependencies)?.lines() {
+        for word in line.split(' ') {
+            if is_header(word) {
+                headers.add(word);
+            }
+        }
+    }
+
+    return .ok(headers.to_array());
+}
+
+fn is_header(word: string) -> bool {
+    if word.is_empty() || word == "\\" {
+        return false;
+    }
+
+    let letters = word.chars();
+    return letters[letters.count - 1] != ':';
+}

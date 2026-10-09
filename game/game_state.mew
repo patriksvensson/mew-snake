@@ -1,0 +1,71 @@
+#load "snake.mew"
+
+use system;
+
+pub type GameState {
+    field board: Board;
+    field random: Random;
+    pub field snake: Snake;
+    pub mut field food: Cell;
+    pub mut field heading: Direction;
+    pub mut field score: i32;
+    pub mut field record: bool;
+    pub mut field won: bool;
+    pub mut field interval: f64;
+    pub mut field elapsed: f64;
+    pub mut field redoable: bool;
+
+    pub static fn new(board: Board, random: Random) -> GameState {
+        let start = new Cell { x: 6, y: board.rows / 2 };
+        let state = new GameState {
+            board: board,
+            random: random,
+            snake: Snake::new(board, start, length: 4),
+            food: start,
+            heading: .right,
+            score: 0,
+            record: false,
+            won: false,
+            interval: 140.0,
+            elapsed: 0.0,
+            redoable: false,
+        };
+
+        state.place_food();
+        return state;
+    }
+
+    pub fn progress() -> f32 {
+        return Math::Min(1.0, self.elapsed / self.interval) as f32;
+    }
+
+    pub fn blocks(cell: Cell) -> bool {
+        return self.snake.blocks(cell, cell.same(self.food));
+    }
+
+    pub fn can_redo(direction: Direction) -> bool {
+        return self.redoable && self.elapsed < self.interval * 0.25 && direction.is_turn_from(self.heading);
+    }
+
+    pub fn place_food() -> bool {
+        let free = self.board.count() - self.snake.length;
+        if free == 0 {
+            return false;
+        }
+
+        let mut skip = self.random.Next(0, free);
+        for index in 0..self.board.count() {
+            let cell = self.board.cell_at(index);
+            if !self.snake.occupies(cell) {
+                if skip == 0 {
+                    self.food = cell;
+                    return true;
+                }
+
+                skip -= 1;
+            }
+        }
+
+        return false;
+    }
+}

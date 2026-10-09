@@ -1,0 +1,5 @@
+.mew/
+.deps/
+.build/
+.artifacts/
+.DS_Store

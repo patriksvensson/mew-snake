@@ -1,0 +1,39 @@
+#load "engine/geometry.mew"
+#load "snake.mew"
+
+use engine;
+
+pub type Viewport {
+    pub field board: Board;
+    pub field cell: f32 = 28.0;
+    pub field margin: f32 = 20.0;
+    pub field top: f32 = 76.0;
+
+    pub field grid_width: f32 {
+        get { return self.board.columns * self.cell; }
+    }
+
+    pub field grid_height: f32 {
+        get { return self.board.rows * self.cell; }
+    }
+
+    pub field bottom: f32 {
+        get { return self.top + self.grid_height; }
+    }
+
+    pub field width: f32 {
+        get { return self.margin * 2.0 + self.grid_width; }
+    }
+
+    pub field height: f32 {
+        get { return self.bottom + self.margin; }
+    }
+
+    pub field size: Size {
+        get { return new Size { width: self.width as i32, height: self.height as i32 }; }
+    }
+
+    pub fn center(cell: Cell) -> Point {
+        return new Point { x: self.margin + (cell.x + 0.5f32) * self.cell, y: self.top + (cell.y + 0.5f32) * self.cell };
+    }
+}

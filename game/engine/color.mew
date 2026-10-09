@@ -1,0 +1,48 @@
+namespace engine;
+
+use system;
+
+[struct]
+pub type Color {
+    pub field r: u8;
+    pub field g: u8;
+    pub field b: u8;
+    pub field a: u8 = 255;
+
+    pub static fn rgb(r: u8, g: u8, b: u8) -> Color {
+        return new Color { r: r, g: g, b: b };
+    }
+
+    pub fn fade(amount: f32) -> Color {
+        return new Color { r: self.r, g: self.g, b: self.b, a: self.a.scale(amount) };
+    }
+
+    pub fn mix(other: Color, amount: f32) -> Color {
+        return new Color {
+            r: self.r.blend(other.r, amount),
+            g: self.g.blend(other.g, amount),
+            b: self.b.blend(other.b, amount),
+            a: self.a.blend(other.a, amount),
+        };
+    }
+}
+
+impl u8 {
+    pub fn to_unit() -> f32 {
+        return self / 255.0;
+    }
+
+    pub fn scale(amount: f32) -> u8 {
+        return (self * amount.clamp_to_unit()) as u8;
+    }
+
+    pub fn blend(target: u8, amount: f32) -> u8 {
+        return (self + (target - self) * amount.clamp_to_unit()) as u8;
+    }
+}
+
+impl f32 {
+    pub fn clamp_to_unit() -> f32 {
+        return Math::Clamp(self, 0.0, 1.0);
+    }
+}

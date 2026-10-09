@@ -1,0 +1,40 @@
+#load "engine/sdl.mew"
+#load "engine/sokol.mew"
+#load "game.mew"
+#load "high_score.mew"
+#load "input.mew"
+#load "viewport.mew"
+#load "scene.mew"
+#load "snake.mew"
+
+use engine;
+
+let board = new Board { };
+let viewport = new Viewport { board: board };
+let opened = Window::open("Mew Snake", viewport.size);
+if let .err(reason) = opened {
+    eprintln(reason);
+    return 1;
+}
+
+let window = opened.unwrap();
+let painter = Painter::new(window);
+let scene = Scene::new(painter, viewport);
+let game = Game::new(board, HighScore::load());
+let input = Input::new(window);
+let clock = Clock::start();
+
+let mut running = true;
+while running {
+    for command in input {
+        running = running && game.handle(command);
+    }
+
+    let elapsed = clock.tick();
+    game.update(elapsed);
+
+    scene.draw(game, elapsed);
+}
+
+painter.shutdown();
+window.close();

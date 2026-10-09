@@ -1,0 +1,70 @@
+#load "color.mew"
+#load "geometry.mew"
+#load "sokol.mew"
+
+namespace engine;
+
+use system;
+
+pub type Sparks {
+    field x: f32[];
+    field y: f32[];
+    field dx: f32[];
+    field dy: f32[];
+    field life: f32[];
+    field colors: Color[];
+    field random: Random;
+    mut field next: i32;
+
+    pub static fn new(capacity: i32) -> Sparks {
+        return new Sparks {
+            x: new f32[capacity],
+            y: new f32[capacity],
+            dx: new f32[capacity],
+            dy: new f32[capacity],
+            life: new f32[capacity],
+            colors: new Color[capacity],
+            random: new Random { },
+            next: 0,
+        };
+    }
+
+    pub fn burst(at: Point, color: Color, count: i32, speed: f32) {
+        let turn = 6.283185307179586;
+        for spark in 0..count {
+            let angle = self.random.NextDouble() * turn;
+            let velocity = speed * (0.35 + self.random.NextDouble() * 0.65);
+            let slot = self.next;
+            self.next = (self.next + 1) % self.life.count;
+            self.x[slot] = at.x;
+            self.y[slot] = at.y;
+            self.dx[slot] = (Math::Cos(angle) * velocity) as f32;
+            self.dy[slot] = (Math::Sin(angle) * velocity) as f32;
+            self.life[slot] = (0.6 + self.random.NextDouble() * 0.4) as f32;
+            self.colors[slot] = color;
+        }
+    }
+
+    pub fn update(milliseconds: f64) {
+        let seconds = (milliseconds / 1000.0) as f32;
+        let drag = Math::Max(0.0, 1.0 - seconds * 3.0);
+        for at in self.alive() {
+            self.x[at] += self.dx[at] * seconds;
+            self.y[at] += self.dy[at] * seconds;
+            self.dx[at] *= drag;
+            self.dy[at] *= drag;
+            self.life[at] -= seconds * 1.4;
+        }
+    }
+
+    pub fn draw(painter: Painter) {
+        for at in self.alive() {
+            let size = 2.0 + self.life[at] * 5.0;
+            painter.rect(self.x[at] - size / 2, self.y[at] - size / 2, size, size, self.colors[at].fade(self.life[at]));
+        }
+    }
+
+    fn alive() -> Enumerable<i32> {
+        return (0..self.life.count).filter(|at| self.life[at] > 0.0);
+    }
+}

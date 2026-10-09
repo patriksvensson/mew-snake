@@ -1,0 +1,86 @@
+#load "game_state.mew"
+#load "pilot.mew"
+#load "snake.mew"
+
+pub type Autopilot {
+    field board: Board;
+    field directions: Direction[];
+    field seen: bool[];
+    field queue: i32[];
+
+    pub static fn new(board: Board) -> Autopilot {
+        return new Autopilot {
+            board: board,
+            directions: Direction::all(),
+            seen: new bool[board.count()],
+            queue: new i32[board.count()],
+        };
+    }
+
+    fn is_safe(state: GameState, direction: Direction) -> bool {
+        return !direction.reverses(state.heading) && !state.blocks(state.snake.head().next(direction));
+    }
+
+    fn rate(state: GameState, direction: Direction) -> Move {
+        let next = state.snake.head().next(direction);
+        let score = match self.measure_room(state.snake, next) {
+            room if room < state.snake.length => room - 10_000,
+            _ => -next.distance(state.food),
+        };
+
+        return new Move { direction: direction, score: score };
+    }
+
+    fn measure_room(snake: Snake, start: Cell) -> i32 {
+        for index in 0..self.seen.count {
+            self.seen[index] = false;
+        }
+
+        let mut read = 0;
+        let mut written = 1;
+        self.queue[0] = self.board.index(start);
+        self.seen[self.queue[0]] = true;
+
+        while read < written {
+            let cell = self.board.cell_at(self.queue[read]);
+            read += 1;
+            for direction in self.directions {
+                let next = cell.next(direction);
+                if self.board.contains(next) {
+                    let index = self.board.index(next);
+                    if !self.seen[index] && !snake.occupies(next) {
+                        self.seen[index] = true;
+                        self.queue[written] = index;
+                        written += 1;
+                    }
+                }
+            }
+        }
+
+        return written;
+    }
+}
+
+impl Pilot for Autopilot {
+    pub fn steer(state: GameState) -> Direction {
+        let straight_on = new Move { direction: state.heading, score: -1_000_000 };
+        return self.directions
+            .filter(|direction| self.is_safe(state, direction))
+            .map(|direction| self.rate(state, direction))
+            .fold(straight_on, |best, candidate| best.higher(candidate))
+            .direction;
+    }
+}
+
+type Move {
+    pub field direction: Direction;
+    pub field score: i32;
+
+    pub fn higher(other: Move) -> Move {
+        if other.score > self.score {
+            return other;
+        }
+
+        return self;
+    }
+}
