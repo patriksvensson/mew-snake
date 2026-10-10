@@ -1,0 +1,90 @@
+#load "../engine/screens.mew"
+#load "../game.mew"
+#load "../stage.mew"
+#load "play.mew"
+
+use engine;
+use system;
+
+pub type TitleScreen {
+    field stage: Stage;
+    mut field demo: Game;
+    mut field clock: f64;
+
+    pub static fn new(stage: Stage) -> TitleScreen {
+        return new TitleScreen { stage: stage, demo: stage.demo(), clock: 0.0 };
+    }
+
+    fn is_showing_scores() -> bool {
+        // The title takes turns with the high scores while it waits for a player.
+        return Math::Floor(self.clock / 7000.0) % 2.0 == 1.0;
+    }
+
+    fn draw_title() {
+        let scene = self.stage.scene;
+        let top = scene.viewport.top;
+        scene.shadowed_centered(.large, scene.center, top + 52.0, "MEW", scene.palette.head);
+        scene.shadowed_centered(.large, scene.center, top + 112.0, "SNAKE", scene.palette.text);
+        scene.shadowed_centered(.medium, scene.center, scene.middle - 4.0, self.stage.press, scene.palette.accent.fade(scene.blink));
+        match self.stage.input.controls {
+            .keyboard => {
+                scene.shadowed_lines(.small, scene.center, scene.middle + 52.0, scene.palette.dim, "ARROWS OR WASD TO STEER", "P TO PAUSE, ESC TO QUIT", "F TOGGLES FULL SCREEN");
+            },
+            .gamepad => {
+                scene.shadowed_lines(.small, scene.center, scene.middle + 52.0, scene.palette.dim, "D-PAD OR STICK TO STEER", "OPTIONS OR START TO PAUSE", "F KEY TOGGLES FULL SCREEN");
+            },
+        }
+
+        self.draw_credits(scene.viewport.bottom - 80.0);
+    }
+
+    fn draw_scores() {
+        let scene = self.stage.scene;
+        scene.shadowed_centered(.large, scene.center, scene.viewport.top + 40.0, "HIGH SCORES", scene.palette.head);
+        scene.draw_table(self.stage.high_scores, scene.viewport.top + 140.0, .none);
+        scene.shadowed_centered(.medium, scene.center, scene.viewport.bottom - 70.0, self.stage.press, scene.palette.accent.fade(scene.blink));
+    }
+
+    fn draw_credits(top: f32) {
+        let scene = self.stage.scene;
+        let written = "WRITTEN IN ";
+        let left = scene.center - scene.painter.measure(.small, $"{written}MEW") / 2;
+        let color = scene.palette.dim.fade(0.7);
+        scene.shadowed_centered(.small, scene.center, top + 20.0, "CREATED BY PATRIK SVENSSON", color);
+        scene.shadowed(.small, left, top + 44.0, written, color);
+        scene.shadowed(.small, left + scene.painter.measure(.small, written), top + 44.0, "MEW", scene.palette.head.fade(0.85));
+    }
+}
+
+impl Screen<Command> for TitleScreen {
+    pub fn handle(command: Command) -> Transition<Command> {
+        return match command {
+            .confirm | .play => .swap(PlayScreen::new(self.stage)),
+            .quit => .quit,
+            .steer(_) | .pause | .suspend => .stay,
+        };
+    }
+
+    pub fn update(milliseconds: f64) -> Transition<Command> {
+        self.clock += milliseconds;
+        self.demo.update(milliseconds);
+        self.stage.scene.react(self.demo);
+        if self.demo.over {
+            self.demo = self.stage.demo();
+        }
+
+        return .stay;
+    }
+
+    pub fn draw() {
+        let scene = self.stage.scene;
+        scene.draw_game(self.demo);
+        scene.draw_best(self.stage.high_scores.best());
+        scene.shade(scene.palette.deep_shade);
+        if self.is_showing_scores() {
+            self.draw_scores();
+        } else {
+            self.draw_title();
+        }
+    }
+}

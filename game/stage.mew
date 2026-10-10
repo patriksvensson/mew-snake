@@ -1,0 +1,49 @@
+#load "autopilot.mew"
+#load "game.mew"
+#load "high_scores.mew"
+#load "initials.mew"
+#load "input.mew"
+#load "scene.mew"
+#load "snake.mew"
+
+use system;
+
+// Everything the screens share, which outlives any one of them.
+pub type Stage {
+    pub field board: Board;
+    pub field scene: Scene;
+    pub field input: Input;
+    pub field high_scores: HighScores;
+    pub field initials: Initials;
+    field autopilot: Autopilot;
+    field random: Random;
+
+    pub field press: string {
+        get {
+            return match self.input.controls {
+                .keyboard => "PRESS SPACE",
+                .gamepad => "PRESS ANY BUTTON",
+            };
+        }
+    }
+
+    pub static fn new(board: Board, scene: Scene, input: Input, high_scores: HighScores) -> Stage {
+        return new Stage {
+            board: board,
+            scene: scene,
+            input: input,
+            high_scores: high_scores,
+            initials: Initials::new(),
+            autopilot: Autopilot::new(board),
+            random: new Random { },
+        };
+    }
+
+    pub fn play() -> Game {
+        return Game::play(self.board, self.random);
+    }
+
+    pub fn demo() -> Game {
+        return Game::demo(self.board, self.random, self.autopilot);
+    }
+}

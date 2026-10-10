@@ -65,6 +65,10 @@ void glue_begin(int width, int height, float r, float g, float b) {
     sgl_load_pipeline(glue_blended);
 }
 
+void glue_viewport(int x, int y, int width, int height) {
+    sg_apply_viewport(x, y, width, height, true);
+}
+
 void glue_text(int size) {
     if (size >= 0 && size < GLUE_TEXT_SIZES) {
         sdtx_set_context(glue_texts[size]);

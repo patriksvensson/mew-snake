@@ -1,0 +1,115 @@
+namespace engine;
+
+use std.collections;
+use system;
+
+pub interface Screen<T> {
+    fn handle(command: T) -> Transition<T>;
+    fn update(milliseconds: f64) -> Transition<T>;
+    fn draw();
+}
+
+impl Screen<T> {
+    // A transparent screen lets the one below it keep moving and show through.
+    pub fn is_transparent() -> bool {
+        return false;
+    }
+}
+
+pub union Transition<T> {
+    stay,
+    push(Screen<T>),
+    pop,
+    swap(Screen<T>),
+    reset(Screen<T>),
+    quit,
+}
+
+pub type Screens<T> {
+    field stack: List<Screen<T>>;
+    mut field depth: i32;
+
+    pub static fn new(first: Screen<T>) -> Screens<T> {
+        let screens = new Screens<T> { stack: List<Screen<T>>::new(), depth: 0 };
+        screens.push(first);
+        return screens;
+    }
+
+    pub fn is_empty() -> bool {
+        return self.depth == 0;
+    }
+
+    // Only the screen on top takes commands.
+    pub fn handle(command: T) {
+        if !self.is_empty() {
+            self.apply(self.top().handle(command));
+        }
+    }
+
+    pub fn update(milliseconds: f64) {
+        if self.is_empty() {
+            return;
+        }
+
+        // The screens below the top only move on, since changing the stack is up to the top one.
+        for at in self.base()..self.depth - 1 {
+            self.stack.get(at).update(milliseconds);
+        }
+
+        self.apply(self.top().update(milliseconds));
+    }
+
+    pub fn draw() {
+        for at in self.base()..self.depth {
+            self.stack.get(at).draw();
+        }
+    }
+
+    fn top() -> Screen<T> {
+        return self.stack.get(self.depth - 1);
+    }
+
+    // The lowest screen still in sight, seen through every transparent one above it.
+    fn base() -> i32 {
+        let mut base = Math::Max(0, self.depth - 1);
+        while base > 0 && self.stack.get(base).is_transparent() {
+            base -= 1;
+        }
+
+        return base;
+    }
+
+    fn apply(transition: Transition<T>) {
+        match transition {
+            .stay => { },
+            .push(screen) => {
+                self.push(screen);
+            },
+            .pop => {
+                self.depth -= 1;
+            },
+            .swap(screen) => {
+                self.depth -= 1;
+                self.push(screen);
+            },
+            .reset(screen) => {
+                self.depth = 0;
+                self.push(screen);
+            },
+            .quit => {
+                self.depth = 0;
+            },
+        }
+    }
+
+    fn push(screen: Screen<T>) {
+        // The list never shrinks, so places above the top are reused.
+        if self.depth < self.stack.count() {
+            self.stack.set(self.depth, screen);
+        } else {
+            self.stack.add(screen);
+        }
+
+        self.depth += 1;
+    }
+}

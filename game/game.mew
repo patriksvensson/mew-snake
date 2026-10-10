@@ -1,19 +1,10 @@
 #load "autopilot.mew"
 #load "pilot.mew"
 #load "game_state.mew"
-#load "high_score.mew"
-#load "input.mew"
 #load "snake.mew"
 
 use std.collections;
 use system;
-
-pub union Phase {
-    title,
-    playing,
-    paused,
-    over,
-}
 
 pub union Moment {
     ate(Cell),
@@ -22,115 +13,52 @@ pub union Moment {
 
 pub type Game {
     pub field board: Board;
-    pub field high_score: HighScore;
     pub field moments: List<Moment>;
-    field autopilot: Autopilot;
+    pub field state: GameState;
     field player: Player;
-    field random: Random;
-    pub mut field state: GameState;
-    pub mut field phase: Phase;
-    mut field pilot: Pilot;
+    field pilot: Pilot;
+    field demo: bool;
+    pub mut field over: bool;
+    pub mut field paused: bool;
 
-    pub static fn new(board: Board, high_score: HighScore) -> Game {
-        let random = new Random { };
-        let autopilot = Autopilot::new(board);
+    pub static fn play(board: Board, random: Random) -> Game {
+        let player = Player::new();
+        return new(board, random, player, player, demo: false);
+    }
+
+    pub static fn demo(board: Board, random: Random, autopilot: Autopilot) -> Game {
+        return new(board, random, Player::new(), autopilot, demo: true);
+    }
+
+    static fn new(board: Board, random: Random, player: Player, pilot: Pilot, demo: bool) -> Game {
         return new Game {
             board: board,
-            high_score: high_score,
             moments: List<Moment>::new(),
-            autopilot: autopilot,
-            player: Player::new(),
-            random: random,
             state: GameState::new(board, random),
-            phase: .title,
-            pilot: autopilot,
+            player: player,
+            pilot: pilot,
+            demo: demo,
+            over: false,
+            paused: false,
         };
     }
 
-    pub fn handle(command: Command) -> bool {
-        match command {
-            .quit => {
-                return false;
-            },
-            .steer(direction) => {
-                if self.is_playing() && !self.redo_step(direction) {
-                    self.player.queue(direction, self.state.heading);
-                }
-            },
-            .confirm => {
-                match self.phase {
-                    .title | .over => {
-                        self.reset(.playing);
-                    },
-                    _ => {
-                        self.toggle_pause();
-                    },
-                }
-            },
-            .pause => {
-                self.toggle_pause();
-            },
-            .suspend => {
-                if self.is_playing() {
-                    self.phase = .paused;
-                }
-            },
+    pub fn steer(direction: Direction) {
+        if !self.redo_step(direction) {
+            self.player.queue(direction, self.state.heading);
         }
-
-        return true;
     }
 
     pub fn update(milliseconds: f64) {
         self.moments.clear();
-        if !self.is_moving() {
+        if self.over || self.paused {
             return;
         }
 
         self.state.elapsed += milliseconds;
-        while self.state.elapsed >= self.state.interval && self.is_moving() {
+        while self.state.elapsed >= self.state.interval && !self.over {
             self.state.elapsed -= self.state.interval;
             self.step();
-        }
-    }
-
-    pub fn is_playing() -> bool {
-        return match self.phase {
-            .playing => true,
-            _ => false,
-        };
-    }
-
-    pub fn is_showing_title() -> bool {
-        return match self.phase {
-            .title => true,
-            _ => false,
-        };
-    }
-
-    fn is_moving() -> bool {
-        return self.is_playing() || self.is_showing_title();
-    }
-
-    fn toggle_pause() {
-        match self.phase {
-            .playing => {
-                self.phase = .paused;
-            },
-            .paused => {
-                self.phase = .playing;
-            },
-            _ => { },
-        }
-    }
-
-    fn reset(phase: Phase) {
-        self.state = GameState::new(self.board, self.random);
-        self.player.clear();
-        self.phase = phase;
-        if let .title = phase {
-            self.pilot = self.autopilot;
-        } else {
-            self.pilot = self.player;
         }
     }
 
@@ -175,32 +103,22 @@ pub type Game {
     fn eat() {
         let state = self.state;
         self.moments.add(.ate(state.food));
-        if !self.is_showing_title() {
+        if !self.demo {
             state.score += 1;
             state.interval = Math::Max(70.0, state.interval - 3.0);
         }
 
         if !state.place_food() {
             state.won = true;
-            self.finish();
+            self.over = true;
         }
     }
 
     fn crash() {
-        if !self.is_showing_title() {
+        if !self.demo {
             self.moments.add(.crashed(self.state.snake.head()));
         }
 
-        self.finish();
-    }
-
-    fn finish() {
-        if self.is_showing_title() {
-            self.reset(.title);
-            return;
-        }
-
-        self.state.record = self.high_score.submit(self.state.score);
-        self.phase = .over;
+        self.over = true;
     }
 }

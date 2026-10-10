@@ -1,11 +1,13 @@
+#load "engine/screens.mew"
 #load "engine/sdl.mew"
 #load "engine/sokol.mew"
-#load "game.mew"
-#load "high_score.mew"
+#load "high_scores.mew"
 #load "input.mew"
 #load "viewport.mew"
 #load "scene.mew"
+#load "screens/title.mew"
 #load "snake.mew"
+#load "stage.mew"
 
 use engine;
 
@@ -20,20 +22,22 @@ if let .err(reason) = opened {
 let window = opened.unwrap();
 let painter = Painter::new(window);
 let scene = Scene::new(painter, viewport);
-let game = Game::new(board, HighScore::load());
 let input = Input::new(window);
+let stage = Stage::new(board, scene, input, HighScores::load());
+let screens = Screens<Command>::new(TitleScreen::new(stage));
 let clock = Clock::start();
 
-let mut running = true;
-while running {
+while !screens.is_empty() {
     for command in input {
-        running = running && game.handle(command);
+        screens.handle(command);
     }
 
     let elapsed = clock.tick();
-    game.update(elapsed);
+    screens.update(elapsed);
 
-    scene.draw(game, elapsed);
+    scene.begin(elapsed);
+    screens.draw();
+    scene.end();
 }
 
 painter.shutdown();

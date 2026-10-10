@@ -2,29 +2,48 @@
 #load "snake.mew"
 
 use engine;
+use system;
 
 pub union Command {
     steer(Direction),
     confirm,
+    play,
     pause,
     suspend,
     quit,
 }
 
+pub union Controls {
+    keyboard,
+    gamepad,
+}
+
 pub type Input {
     field window: Window;
+    field stick: Stick;
     mut field command: Option<Command>;
 
+    pub field controls: Controls {
+        get {
+            if self.window.has_gamepad() {
+                return .gamepad;
+            }
+
+            return .keyboard;
+        }
+    }
+
     pub static fn new(window: Window) -> Input {
-        return new Input { window: window, command: .none };
+        return new Input { window: window, stick: Stick::new(), command: .none };
     }
 
     static fn read(event: Event) -> Option<Command> {
         return match event {
             .quit => .some(.quit),
-            .focus_lost => .some(.suspend),
+            .focus_lost | .gamepad_removed(_) => .some(.suspend),
             .key(key) => read_key(key),
-            .other => .none,
+            .button(button) => read_button(button),
+            .entered_fullscreen | .left_fullscreen | .gamepad_added(_) | .axis(_, _, _) | .other => .none,
         };
     }
 
@@ -36,8 +55,27 @@ pub type Input {
             .right | .d => .some(.steer(.right)),
             .space | .enter => .some(.confirm),
             .p => .some(.pause),
+            .f => .some(.suspend),
             .escape => .some(.quit),
             .other => .none,
+        };
+    }
+
+    static fn read_button(button: Button) -> Option<Command> {
+        return match button {
+            .up => .some(.steer(.up)),
+            .down => .some(.steer(.down)),
+            .left => .some(.steer(.left)),
+            .right => .some(.steer(.right)),
+            .start => .some(.confirm),
+            .other => .some(.play),
+        };
+    }
+
+    static fn steer(direction: Option<Direction>) -> Option<Command> {
+        return match direction {
+            .some(direction) => .some(.steer(direction)),
+            .none => .none,
         };
     }
 }
@@ -53,9 +91,21 @@ impl Enumerator<Command> for Input {
         loop {
             match self.window.poll() {
                 .none => {
-                    return false;
+                    // A stick reports each axis on its own, so it is read once every event is in.
+                    self.command = steer(self.stick.turn());
+                    return self.command.is_some();
                 },
                 .some(event) => {
+                    match event {
+                        .axis(gamepad, axis, value) => {
+                            self.stick.tilt(gamepad, axis, value);
+                        },
+                        .key(.f) => {
+                            self.window.toggle_fullscreen();
+                        },
+                        _ => { },
+                    }
+
                     self.command = read(event);
                     if self.command.is_some() {
                         return true;
@@ -67,5 +117,94 @@ impl Enumerator<Command> for Input {
 
     pub fn current() -> Command {
         return self.command.unwrap();
+    }
+}
+
+type Stick {
+    mut field gamepad: u32;
+    mut field x: i32;
+    mut field y: i32;
+    mut field aim: Option<Direction>;
+
+    pub static fn new() -> Stick {
+        return new Stick { gamepad: 0, x: 0, y: 0, aim: .none };
+    }
+
+    pub fn tilt(gamepad: u32, axis: Axis, value: i32) {
+        if let .other = axis {
+            return;
+        }
+
+        if gamepad != self.gamepad {
+            if self.aim.is_some() {
+                return;
+            }
+
+            self.gamepad = gamepad;
+            self.x = 0;
+            self.y = 0;
+        }
+
+        match axis {
+            .left_x => {
+                self.x = value;
+            },
+            .left_y => {
+                self.y = value;
+            },
+            .other => { },
+        }
+    }
+
+    pub fn turn() -> Option<Direction> {
+        let press = 16000;
+        let release = 10000;
+        let horizontal = Math::Abs(self.x);
+        let vertical = Math::Abs(self.y);
+        let reach = Math::Max(horizontal, vertical);
+        if reach < release {
+            self.aim = .none;
+            return .none;
+        }
+
+        if reach < press {
+            return .none;
+        }
+
+        // Changing axis takes a clear lean, so a stick held near a diagonal does not zigzag.
+        let mut sideways = horizontal >= vertical;
+        if let .some(current) = self.aim {
+            if current.dx() != 0 {
+                sideways = vertical * 2 < horizontal * 3;
+            } else {
+                sideways = horizontal * 2 > vertical * 3;
+            }
+        }
+
+        let direction = self.pointing(sideways);
+        if let .some(current) = self.aim {
+            if current.same(direction) {
+                return .none;
+            }
+        }
+
+        self.aim = .some(direction);
+        return .some(direction);
+    }
+
+    fn pointing(sideways: bool) -> Direction {
+        if sideways {
+            if self.x < 0 {
+                return .left;
+            }
+
+            return .right;
+        }
+
+        if self.y < 0 {
+            return .up;
+        }
+
+        return .down;
     }
 }

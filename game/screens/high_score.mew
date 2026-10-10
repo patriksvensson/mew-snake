@@ -1,0 +1,104 @@
+#load "../engine/geometry.mew"
+#load "../engine/screens.mew"
+#load "../game.mew"
+#load "../initials.mew"
+#load "../stage.mew"
+#load "game_over.mew"
+
+use engine;
+use system;
+
+pub type HighScoreScreen {
+    field stage: Stage;
+    field game: Game;
+    mut field calm: f64;
+
+    pub static fn new(stage: Stage, game: Game) -> HighScoreScreen {
+        stage.initials.restart();
+        return new HighScoreScreen { stage: stage, game: game, calm: 800.0 };
+    }
+
+    fn save() -> GameOverScreen {
+        let rank = self.stage.high_scores.add(self.stage.initials.text, self.game.state.score);
+        return GameOverScreen::new(self.stage, self.game, .some(rank));
+    }
+
+    fn draw_initials(top: f32) {
+        let scene = self.stage.scene;
+        let initials = self.stage.initials;
+        let spacing: f32 = 80.0;
+        for at in 0..initials.count {
+            let x = scene.center + (at * 2 - initials.count + 1) * spacing / 2;
+            let mut color = scene.palette.text;
+            if at == initials.cursor {
+                let arrow = scene.palette.accent.fade(scene.blink);
+                scene.painter.triangle(new Point { x: x, y: top - 26.0 }, new Point { x: x + 14.0, y: top - 12.0 }, new Point { x: x - 14.0, y: top - 12.0 }, arrow);
+                scene.painter.triangle(new Point { x: x - 14.0, y: top + 72.0 }, new Point { x: x + 14.0, y: top + 72.0 }, new Point { x: x, y: top + 86.0 }, arrow);
+                color = scene.palette.accent;
+            }
+
+            scene.shadowed_centered(.large, x, top, initials.letter(at), color);
+            scene.painter.rect(x - 28.0, top + 58.0, 56.0, 4.0, color);
+        }
+    }
+}
+
+impl Screen<Command> for HighScoreScreen {
+    pub fn is_transparent() -> bool {
+        return true;
+    }
+
+    pub fn handle(command: Command) -> Transition<Command> {
+        if let .quit = command {
+            self.save();
+            return .quit;
+        }
+
+        // Buttons still being pressed as the game ended should not rush past the initials.
+        if self.calm > 0.0 {
+            return .stay;
+        }
+
+        match command {
+            .steer(direction) => {
+                self.stage.initials.steer(direction);
+            },
+            .confirm | .play => {
+                if self.stage.initials.advance() {
+                    return .swap(self.save());
+                }
+            },
+            .pause | .suspend | .quit => { },
+        }
+
+        return .stay;
+    }
+
+    pub fn update(milliseconds: f64) -> Transition<Command> {
+        self.calm = Math::Max(0.0, self.calm - milliseconds);
+        return .stay;
+    }
+
+    pub fn draw() {
+        let scene = self.stage.scene;
+        let score = self.game.state.score;
+        let mut title = "HIGH SCORE!";
+        if self.stage.high_scores.place(score) == 0 {
+            title = "NEW BEST!";
+        }
+
+        let mut next = "FOR NEXT LETTER";
+        if self.stage.initials.cursor == self.stage.initials.count - 1 {
+            next = "TO SAVE";
+        }
+
+        let top = scene.viewport.top;
+        scene.shade(scene.palette.deep_shade);
+        scene.shadowed_centered(.large, scene.center, top + 30.0, title, scene.palette.accent);
+        scene.shadowed_centered(.medium, scene.center, top + 100.0, $"SCORE {score}", scene.palette.text);
+        scene.shadowed_centered(.small, scene.center, top + 150.0, "ENTER YOUR INITIALS", scene.palette.dim);
+        self.draw_initials(scene.middle - 10.0);
+        scene.shadowed_centered(.small, scene.center, scene.middle + 110.0, "UP OR DOWN TO PICK A LETTER", scene.palette.dim);
+        scene.shadowed_centered(.small, scene.center, scene.middle + 140.0, $"{self.stage.press} {next}", scene.palette.accent.fade(scene.blink));
+    }
+}

@@ -33,3 +33,9 @@ mew build
 ```shell
 mew build play
 ```
+
+A gamepad, such as a PS5 or Xbox controller, works too. Steer with the d-pad
+or the left stick, press any other button to play, and Options/Start to pause.
+Press F to toggle full screen.
+Reach the top 10 to put your initials on the high score list, picking each
+letter with up and down.

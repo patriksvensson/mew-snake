@@ -1,0 +1,48 @@
+#load "../engine/screens.mew"
+#load "../game.mew"
+#load "../stage.mew"
+
+use engine;
+
+pub type PauseScreen {
+    field stage: Stage;
+    field game: Game;
+
+    // The game still shows through, and keeps being updated, so it has to hold still on its own.
+    pub static fn new(stage: Stage, game: Game) -> PauseScreen {
+        game.paused = true;
+        return new PauseScreen { stage: stage, game: game };
+    }
+}
+
+impl Screen<Command> for PauseScreen {
+    pub fn is_transparent() -> bool {
+        return true;
+    }
+
+    pub fn handle(command: Command) -> Transition<Command> {
+        match command {
+            .confirm | .play | .pause => {
+                self.game.paused = false;
+                return .pop;
+            },
+            .quit => {
+                return .quit;
+            },
+            .steer(_) | .suspend => { },
+        }
+
+        return .stay;
+    }
+
+    pub fn update(milliseconds: f64) -> Transition<Command> {
+        return .stay;
+    }
+
+    pub fn draw() {
+        let scene = self.stage.scene;
+        scene.shade(scene.palette.deep_shade);
+        scene.shadowed_centered(.large, scene.center, scene.middle - 50.0, "PAUSED", scene.palette.text);
+        scene.shadowed_centered(.medium, scene.center, scene.middle + 40.0, self.stage.press, scene.palette.accent.fade(scene.blink));
+    }
+}

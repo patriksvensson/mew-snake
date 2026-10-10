@@ -1,0 +1,119 @@
+use std.collections;
+use std.io;
+use system;
+
+pub type Entry {
+    pub field initials: string;
+    pub field score: i32;
+}
+
+pub type HighScores {
+    field path: string;
+    pub field limit: i32;
+    mut field entries: List<Entry>;
+
+    pub field count: i32 {
+        get { return self.entries.count(); }
+    }
+
+    pub static fn load() -> HighScores {
+        let path = $"{Environment::GetEnvironmentVariable("HOME")}/.mew-snake";
+        let scores = new HighScores { path: path, limit: 10, entries: List<Entry>::new() };
+        if let .ok(entries) = read(path) {
+            for entry in entries {
+                scores.rank(entry);
+            }
+        }
+
+        return scores;
+    }
+
+    pub fn entry(index: i32) -> Entry {
+        return self.entries.get(index);
+    }
+
+    pub fn best() -> i32 {
+        if self.entries.count() == 0 {
+            return 0;
+        }
+
+        return self.entries.get(0).score;
+    }
+
+    pub fn place(score: i32) -> i32 {
+        let mut place = 0;
+        for entry in self.entries {
+            if entry.score >= score {
+                place += 1;
+            }
+        }
+
+        return place;
+    }
+
+    pub fn qualifies(score: i32) -> bool {
+        return score > 0 && self.place(score) < self.limit;
+    }
+
+    pub fn add(initials: string, score: i32) -> i32 {
+        let place = self.rank(new Entry { initials: initials, score: score });
+        let lines = List<string>::new();
+        for entry in self.entries {
+            lines.add($"{entry.initials} {entry.score}");
+        }
+
+        if let .err(problem) = write_text(file(self.path), string::join("\n", lines)) {
+            eprintln($"The high scores could not be saved: {problem}");
+        }
+
+        return place;
+    }
+
+    fn rank(newcomer: Entry) -> i32 {
+        let place = self.place(newcomer.score);
+        let ranked = List<Entry>::new();
+        for entry in self.entries {
+            if ranked.count() == place {
+                ranked.add(newcomer);
+            }
+
+            if ranked.count() < self.limit {
+                ranked.add(entry);
+            }
+        }
+
+        if ranked.count() == place && place < self.limit {
+            ranked.add(newcomer);
+        }
+
+        self.entries = ranked;
+        return place;
+    }
+
+    static fn read(path: string) -> Result<List<Entry>, string> {
+        let entries = List<Entry>::new();
+        if !exists(path) {
+            return .ok(entries);
+        }
+
+        for line in read_text(file(path))?.lines() {
+            let parts = line.trim_end().split(' ');
+            if parts.count == 2 {
+                if let .ok(score) = parts[1].parse_i32() {
+                    entries.add(new Entry { initials: parts[0], score: score });
+                }
+            }
+
+            // Older versions only kept the best score, without initials.
+            if parts.count == 1 {
+                if let .ok(score) = parts[0].parse_i32() {
+                    if score > 0 {
+                        entries.add(new Entry { initials: "???", score: score });
+                    }
+                }
+            }
+        }
+
+        return .ok(entries);
+    }
+}

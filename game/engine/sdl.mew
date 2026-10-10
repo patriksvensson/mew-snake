@@ -32,6 +32,15 @@ static external fn SDL_GL_SetSwapInterval(interval: i32) -> bool;
 static external fn SDL_GL_SwapWindow(window: i64) -> bool;
 
 [ffi("SDL3")]
+static external fn SDL_SetWindowFullscreen(window: i64, fullscreen: bool) -> bool;
+
+[ffi("SDL3")]
+static external fn SDL_ShowCursor() -> bool;
+
+[ffi("SDL3")]
+static external fn SDL_HideCursor() -> bool;
+
+[ffi("SDL3")]
 static external fn SDL_GetWindowSizeInPixels(window: i64, width: i32[], height: i32[]) -> bool;
 
 [ffi("SDL3")]
@@ -39,6 +48,18 @@ static external fn SDL_PollEvent(event: u8[]) -> bool;
 
 [ffi("SDL3")]
 static external fn SDL_GetTicks() -> u64;
+
+[ffi("SDL3")]
+static external fn SDL_OpenGamepad(id: u32) -> i64;
+
+[ffi("SDL3")]
+static external fn SDL_GetGamepadFromID(id: u32) -> i64;
+
+[ffi("SDL3")]
+static external fn SDL_CloseGamepad(gamepad: i64) -> void;
+
+[ffi("SDL3")]
+static external fn SDL_HasGamepad() -> bool;
 
 pub union Key {
     up,
@@ -49,6 +70,7 @@ pub union Key {
     a,
     s,
     d,
+    f,
     p,
     space,
     enter,
@@ -67,6 +89,7 @@ impl Key {
             4 => .a,
             22 => .s,
             7 => .d,
+            9 => .f,
             19 => .p,
             44 => .space,
             40 => .enter,
@@ -76,10 +99,54 @@ impl Key {
     }
 }
 
+pub union Button {
+    up,
+    down,
+    left,
+    right,
+    start,
+    other,
+}
+
+impl Button {
+    pub static fn from_index(index: u8) -> Button {
+        return match index {
+            6 => .start,
+            11 => .up,
+            12 => .down,
+            13 => .left,
+            14 => .right,
+            _ => .other,
+        };
+    }
+}
+
+pub union Axis {
+    left_x,
+    left_y,
+    other,
+}
+
+impl Axis {
+    pub static fn from_index(index: u8) -> Axis {
+        return match index {
+            0 => .left_x,
+            1 => .left_y,
+            _ => .other,
+        };
+    }
+}
+
 pub union Event {
     quit,
     focus_lost,
+    entered_fullscreen,
+    left_fullscreen,
     key(Key),
+    gamepad_added(u32),
+    gamepad_removed(u32),
+    button(Button),
+    axis(u32, Axis, i32),
     other,
 }
 
@@ -87,7 +154,13 @@ impl Event {
     pub static fn decode(bytes: u8[]) -> Event {
         let quit: u32 = 0x100;
         let focus_lost: u32 = 0x20F;
+        let entered_fullscreen: u32 = 0x217;
+        let left_fullscreen: u32 = 0x218;
         let key_down: u32 = 0x300;
+        let axis_motion: u32 = 0x650;
+        let button_down: u32 = 0x651;
+        let gamepad_added: u32 = 0x653;
+        let gamepad_removed: u32 = 0x654;
 
         let kind = BitConverter::ToUInt32(bytes, 0);
         if kind == quit {
@@ -98,9 +171,34 @@ impl Event {
             return .focus_lost;
         }
 
+        if kind == entered_fullscreen {
+            return .entered_fullscreen;
+        }
+
+        if kind == left_fullscreen {
+            return .left_fullscreen;
+        }
+
         let repeated = bytes[37] != 0;
         if kind == key_down && !repeated {
             return .key(Key::from_scancode(BitConverter::ToUInt32(bytes, 24)));
+        }
+
+        let gamepad = BitConverter::ToUInt32(bytes, 16);
+        if kind == gamepad_added {
+            return .gamepad_added(gamepad);
+        }
+
+        if kind == gamepad_removed {
+            return .gamepad_removed(gamepad);
+        }
+
+        if kind == button_down {
+            return .button(Button::from_index(bytes[20]));
+        }
+
+        if kind == axis_motion {
+            return .axis(gamepad, Axis::from_index(bytes[20]), BitConverter::ToInt16(bytes, 24));
         }
 
         return .other;
@@ -130,12 +228,17 @@ pub type Window {
     field pixel_height: i32[];
     pub field size: Size;
     pub field samples: i32;
+    mut field fullscreen: bool;
 
     pub static fn open(title: string, size: Size, samples: i32 = 4) -> Result<Window, string> {
         let video: u32 = 0x20;
         if !SDL_Init(video) {
             return .err("SDL could not start its video subsystem.");
         }
+
+        // The keyboard still works when gamepads are unavailable.
+        let gamepad: u32 = 0x2000;
+        SDL_Init(gamepad);
 
         let depth_size = 6;
         let stencil_size = 7;
@@ -180,15 +283,44 @@ pub type Window {
             pixel_height: new i32[1],
             size: size,
             samples: samples,
+            fullscreen: false,
         });
     }
 
     pub fn poll() -> Option<Event> {
-        if SDL_PollEvent(self.event) {
-            return .some(Event::decode(self.event));
+        if !SDL_PollEvent(self.event) {
+            return .none;
         }
 
-        return .none;
+        // SDL only reports buttons and sticks for gamepads that have been opened.
+        let event = Event::decode(self.event);
+        match event {
+            .gamepad_added(gamepad) => {
+                SDL_OpenGamepad(gamepad);
+            },
+            .gamepad_removed(gamepad) => {
+                SDL_CloseGamepad(SDL_GetGamepadFromID(gamepad));
+            },
+            .entered_fullscreen => {
+                self.fullscreen = true;
+                SDL_HideCursor();
+            },
+            .left_fullscreen => {
+                self.fullscreen = false;
+                SDL_ShowCursor();
+            },
+            _ => { },
+        }
+
+        return .some(event);
+    }
+
+    pub fn toggle_fullscreen() {
+        SDL_SetWindowFullscreen(self.handle, !self.fullscreen);
+    }
+
+    pub fn has_gamepad() -> bool {
+        return SDL_HasGamepad();
     }
 
     pub fn pixels() -> Size {

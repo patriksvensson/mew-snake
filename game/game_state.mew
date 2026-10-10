@@ -9,7 +9,6 @@ pub type GameState {
     pub mut field food: Cell;
     pub mut field heading: Direction;
     pub mut field score: i32;
-    pub mut field record: bool;
     pub mut field won: bool;
     pub mut field interval: f64;
     pub mut field elapsed: f64;
@@ -24,7 +23,6 @@ pub type GameState {
             food: start,
             heading: .right,
             score: 0,
-            record: false,
             won: false,
             interval: 140.0,
             elapsed: 0.0,

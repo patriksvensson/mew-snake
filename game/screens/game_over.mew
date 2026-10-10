@@ -1,0 +1,60 @@
+#load "../engine/screens.mew"
+#load "../game.mew"
+#load "../stage.mew"
+#load "play.mew"
+
+use engine;
+use system;
+
+pub type GameOverScreen {
+    field stage: Stage;
+    field game: Game;
+    field rank: Option<i32>;
+    mut field calm: f64;
+
+    pub static fn new(stage: Stage, game: Game, rank: Option<i32>) -> GameOverScreen {
+        return new GameOverScreen { stage: stage, game: game, rank: rank, calm: 800.0 };
+    }
+}
+
+impl Screen<Command> for GameOverScreen {
+    pub fn is_transparent() -> bool {
+        return true;
+    }
+
+    pub fn handle(command: Command) -> Transition<Command> {
+        if let .quit = command {
+            return .quit;
+        }
+
+        // Buttons still being pressed as the game ended should not start the next one.
+        if self.calm > 0.0 {
+            return .stay;
+        }
+
+        return match command {
+            .confirm | .play => .reset(PlayScreen::new(self.stage)),
+            .steer(_) | .pause | .suspend | .quit => .stay,
+        };
+    }
+
+    pub fn update(milliseconds: f64) -> Transition<Command> {
+        self.calm = Math::Max(0.0, self.calm - milliseconds);
+        return .stay;
+    }
+
+    pub fn draw() {
+        let scene = self.stage.scene;
+        let mut title = "GAME OVER";
+        if self.game.state.won {
+            title = "YOU WIN";
+        }
+
+        let top = scene.viewport.top;
+        scene.shade(scene.palette.shade);
+        scene.shadowed_centered(.large, scene.center, top + 30.0, title, scene.palette.crash);
+        scene.shadowed_centered(.medium, scene.center, top + 100.0, $"SCORE {self.game.state.score}", scene.palette.text);
+        scene.draw_table(self.stage.high_scores, top + 150.0, self.rank);
+        scene.shadowed_centered(.small, scene.center, scene.viewport.bottom - 50.0, $"{self.stage.press} TO PLAY AGAIN", scene.palette.accent.fade(scene.blink));
+    }
+}

@@ -1,0 +1,62 @@
+#load "../engine/screens.mew"
+#load "../game.mew"
+#load "../stage.mew"
+#load "game_over.mew"
+#load "high_score.mew"
+#load "pause.mew"
+
+use engine;
+
+pub type PlayScreen {
+    field stage: Stage;
+    field game: Game;
+
+    pub static fn new(stage: Stage) -> PlayScreen {
+        return new PlayScreen { stage: stage, game: stage.play() };
+    }
+}
+
+impl Screen<Command> for PlayScreen {
+    pub fn handle(command: Command) -> Transition<Command> {
+        match command {
+            .steer(direction) => {
+                self.game.steer(direction);
+            },
+            .confirm | .pause | .suspend => {
+                return .push(PauseScreen::new(self.stage, self.game));
+            },
+            .quit => {
+                return .quit;
+            },
+            .play => { },
+        }
+
+        return .stay;
+    }
+
+    pub fn update(milliseconds: f64) -> Transition<Command> {
+        // The result is already showing on top, over the game that ended.
+        if self.game.over {
+            return .stay;
+        }
+
+        self.game.update(milliseconds);
+        self.stage.scene.react(self.game);
+        if !self.game.over {
+            return .stay;
+        }
+
+        if self.stage.high_scores.qualifies(self.game.state.score) {
+            return .push(HighScoreScreen::new(self.stage, self.game));
+        }
+
+        return .push(GameOverScreen::new(self.stage, self.game, .none));
+    }
+
+    pub fn draw() {
+        let scene = self.stage.scene;
+        scene.draw_game(self.game);
+        scene.draw_score(self.game.state.score);
+        scene.draw_best(self.stage.high_scores.best());
+    }
+}

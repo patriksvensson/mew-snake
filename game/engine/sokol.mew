@@ -13,6 +13,9 @@ static external fn glue_setup(samples: i32) -> void;
 static external fn glue_begin(width: i32, height: i32, r: f32, g: f32, b: f32) -> void;
 
 [ffi("sokol")]
+static external fn glue_viewport(x: i32, y: i32, width: i32, height: i32) -> void;
+
+[ffi("sokol")]
 static external fn glue_text(size: i32) -> void;
 
 [ffi("sokol")]
@@ -120,6 +123,13 @@ pub type Painter {
     pub fn begin(background: Color) {
         let pixels = self.window.pixels();
         glue_begin(pixels.width, pixels.height, background.r.to_unit(), background.g.to_unit(), background.b.to_unit());
+
+        // The scene keeps its shape on any screen, with the background color filling the rest.
+        let size = self.window.size;
+        let scale = Math::Min((pixels.width as f32) / size.width, (pixels.height as f32) / size.height);
+        let width = (size.width * scale) as i32;
+        let height = (size.height * scale) as i32;
+        glue_viewport((pixels.width - width) / 2, (pixels.height - height) / 2, width, height);
         sgl_matrix_mode_projection();
         sgl_ortho(0.0, self.window.size.width, self.window.size.height, 0.0, -1.0, 1.0);
         sgl_matrix_mode_modelview();
@@ -170,6 +180,15 @@ pub type Painter {
             }
         }
 
+        sgl_end();
+    }
+
+    pub fn triangle(a: Point, b: Point, c: Point, color: Color) {
+        sgl_begin_triangles();
+        sgl_c4b(color.r, color.g, color.b, color.a);
+        sgl_v2f(a.x, a.y);
+        sgl_v2f(b.x, b.y);
+        sgl_v2f(c.x, c.y);
         sgl_end();
     }
 

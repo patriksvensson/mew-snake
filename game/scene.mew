@@ -3,6 +3,7 @@
 #load "engine/geometry.mew"
 #load "engine/sokol.mew"
 #load "game.mew"
+#load "high_scores.mew"
 #load "viewport.mew"
 
 use engine;
@@ -53,14 +54,26 @@ pub type Palette {
 }
 
 pub type Scene {
-    field painter: Painter;
-    field viewport: Viewport;
-    field palette: Palette;
+    pub field painter: Painter;
+    pub field viewport: Viewport;
+    pub field palette: Palette;
     field sparks: Sparks;
     field points: Point[];
     field colors: Color[];
     mut field clock: f64;
     mut field shake: f32;
+
+    pub field center: f32 {
+        get { return self.viewport.width / 2; }
+    }
+
+    pub field middle: f32 {
+        get { return self.viewport.top + self.viewport.grid_height / 2; }
+    }
+
+    pub field blink: f32 {
+        get { return (0.6 + Math::Sin(self.clock * 0.006) * 0.4) as f32; }
+    }
 
     pub static fn new(painter: Painter, viewport: Viewport) -> Scene {
         let points = viewport.board.count() + 1;
@@ -76,27 +89,19 @@ pub type Scene {
         };
     }
 
-    pub fn draw(game: Game, milliseconds: f64) {
-        self.react(game, milliseconds);
-
-        let shake = self.shake * self.shake * 9.0;
-        let dx = (Math::Sin(self.clock * 0.09) * shake) as f32;
-        let dy = (Math::Cos(self.clock * 0.11) * shake) as f32;
-
+    // Effects keep moving under every screen, even when the game below one is paused.
+    pub fn begin(milliseconds: f64) {
+        self.clock += milliseconds;
+        self.shake = Math::Max(0.0, self.shake - milliseconds / 450.0) as f32;
+        self.sparks.update(milliseconds);
         self.painter.begin(self.palette.background);
-        self.painter.shift(dx, dy);
-        self.draw_board();
-        self.draw_food(game);
-        self.draw_snake(game);
-        self.sparks.draw(self.painter);
-        self.painter.unshift();
-        self.draw_hud(game);
-        self.draw_overlay(game);
+    }
+
+    pub fn end() {
         self.painter.end();
     }
 
-    fn react(game: Game, milliseconds: f64) {
-        self.clock += milliseconds;
+    pub fn react(game: Game) {
         for moment in game.moments {
             match moment {
                 .ate(cell) => {
@@ -110,9 +115,73 @@ pub type Scene {
                 },
             }
         }
+    }
 
-        self.shake = Math::Max(0.0, self.shake - milliseconds / 450.0) as f32;
-        self.sparks.update(milliseconds);
+    pub fn draw_game(game: Game) {
+        let shake = self.shake * self.shake * 9.0;
+        let dx = (Math::Sin(self.clock * 0.09) * shake) as f32;
+        let dy = (Math::Cos(self.clock * 0.11) * shake) as f32;
+
+        self.painter.shift(dx, dy);
+        self.draw_board();
+        self.draw_food(game);
+        self.draw_snake(game);
+        self.sparks.draw(self.painter);
+        self.painter.unshift();
+    }
+
+    pub fn draw_score(score: i32) {
+        self.shadowed(.medium, self.viewport.margin, 24.0, $"SCORE {score}", self.palette.text);
+    }
+
+    pub fn draw_best(best: i32) {
+        let text = $"BEST {best}";
+        self.shadowed(.medium, self.viewport.width - self.viewport.margin - self.painter.measure(.medium, text), 24.0, text, self.palette.dim);
+    }
+
+    pub fn draw_table(scores: HighScores, top: f32, highlight: Option<i32>) {
+        for at in 0..scores.limit {
+            let rank = $"{at + 1}.";
+            let mut initials = "---";
+            let mut points = "-";
+            let mut color = self.palette.dim;
+            if at < scores.count {
+                let entry = scores.entry(at);
+                initials = entry.initials;
+                points = $"{entry.score}";
+                color = self.palette.text;
+            }
+
+            if let .some(index) = highlight {
+                if index == at {
+                    color = self.palette.accent;
+                }
+            }
+
+            self.shadowed_centered(.small, self.center, top + at * 24, $"{rank.pad_left(3)}  {initials}  {points.pad_left(4)}", color);
+        }
+    }
+
+    pub fn shade(color: Color) {
+        let viewport = self.viewport;
+        self.painter.rect(viewport.margin, viewport.top, viewport.grid_width, viewport.grid_height, color);
+    }
+
+    pub fn shadowed(size: TextSize, x: f32, y: f32, text: string, color: Color) {
+        let offset = size.scale();
+        self.painter.write(size, x + offset, y + offset, text, self.palette.shadow.fade(color.a.to_unit()));
+        self.painter.write(size, x, y, text, color);
+    }
+
+    pub fn shadowed_centered(size: TextSize, center: f32, y: f32, text: string, color: Color) {
+        self.shadowed(size, center - self.painter.measure(size, text) / 2, y, text, color);
+    }
+
+    pub fn shadowed_lines(size: TextSize, center: f32, top: f32, color: Color, lines: ...string) {
+        let height = 12 * size.scale();
+        for at in 0..lines.count {
+            self.shadowed_centered(size, center, top + at * height, lines[at], color);
+        }
     }
 
     fn draw_board() {
@@ -171,7 +240,7 @@ pub type Scene {
     }
 
     fn ease_progress(game: Game) -> f32 {
-        if let .over = game.phase {
+        if game.over {
             return 1.0;
         }
 
@@ -189,7 +258,7 @@ pub type Scene {
 
     fn body(game: Game, at: i32, count: i32) -> Color {
         let color = self.palette.head.mix(self.palette.tail, (at as f32) / count);
-        if let .over = game.phase {
+        if game.over {
             return color.mix(self.palette.crash, self.shake * 0.8);
         }
 
@@ -207,87 +276,6 @@ pub type Scene {
             let eye = center.offset(forward_x * 0.3 + side_x * 0.45 * side, forward_y * 0.3 + side_y * 0.45 * side);
             self.painter.circle(eye, radius * 0.34, self.palette.eye);
             self.painter.circle(eye.offset(forward_x * 0.1, forward_y * 0.1), radius * 0.18, self.palette.pupil);
-        }
-    }
-
-    fn draw_hud(game: Game) {
-        let viewport = self.viewport;
-        let y = 24.0;
-        let best = $"BEST {game.high_score}";
-        if !game.is_showing_title() {
-            self.shadowed(.medium, viewport.margin, y, $"SCORE {game.state.score}", self.palette.text);
-        }
-
-        self.shadowed(.medium, viewport.width - viewport.margin - self.painter.measure(.medium, best), y, best, self.palette.dim);
-    }
-
-    fn draw_overlay(game: Game) {
-        let viewport = self.viewport;
-        let center = viewport.width / 2;
-        let middle = viewport.top + viewport.grid_height / 2;
-        let blink = (0.6 + Math::Sin(self.clock * 0.006) * 0.4) as f32;
-
-        match game.phase {
-            .playing => { },
-            .title => {
-                self.shade(self.palette.deep_shade);
-                self.shadowed_centered(.large, center, viewport.top + 52.0, "MEW", self.palette.head);
-                self.shadowed_centered(.large, center, viewport.top + 112.0, "SNAKE", self.palette.text);
-                self.shadowed_centered(.medium, center, middle - 4.0, "PRESS SPACE", self.palette.accent.fade(blink));
-                self.shadowed_lines(.small, center, middle + 52.0, self.palette.dim, "ARROWS OR WASD TO STEER", "P TO PAUSE, ESC TO QUIT");
-                self.draw_credits(center, viewport.bottom - 80.0);
-            },
-            .paused => {
-                self.shade(self.palette.deep_shade);
-                self.shadowed_centered(.large, center, middle - 50.0, "PAUSED", self.palette.text);
-                self.shadowed_centered(.medium, center, middle + 40.0, "PRESS SPACE", self.palette.accent.fade(blink));
-            },
-            .over => {
-                self.shade(self.palette.shade);
-                let mut title = "GAME OVER";
-                if game.state.won {
-                    title = "YOU WIN";
-                }
-
-                self.shadowed_centered(.large, center, middle - 90.0, title, self.palette.crash);
-                self.shadowed_centered(.medium, center, middle, $"SCORE {game.state.score}", self.palette.text);
-                if game.state.record {
-                    self.shadowed_centered(.small, center, middle + 40.0, "NEW BEST!", self.palette.accent);
-                }
-
-                self.shadowed_centered(.small, center, middle + 90.0, "PRESS SPACE TO PLAY AGAIN", self.palette.accent.fade(blink));
-            },
-        }
-    }
-
-    fn draw_credits(center: f32, top: f32) {
-        let written = "WRITTEN IN ";
-        let left = center - self.painter.measure(.small, $"{written}MEW") / 2;
-        let color = self.palette.dim.fade(0.7);
-        self.shadowed_centered(.small, center, top + 20.0, "CREATED BY PATRIK SVENSSON", color);
-        self.shadowed(.small, left, top + 44.0, written, color);
-        self.shadowed(.small, left + self.painter.measure(.small, written), top + 44.0, "MEW", self.palette.head.fade(0.85));
-    }
-
-    fn shade(color: Color) {
-        let viewport = self.viewport;
-        self.painter.rect(viewport.margin, viewport.top, viewport.grid_width, viewport.grid_height, color);
-    }
-
-    fn shadowed(size: TextSize, x: f32, y: f32, text: string, color: Color) {
-        let offset = size.scale();
-        self.painter.write(size, x + offset, y + offset, text, self.palette.shadow.fade(color.a.to_unit()));
-        self.painter.write(size, x, y, text, color);
-    }
-
-    fn shadowed_centered(size: TextSize, center: f32, y: f32, text: string, color: Color) {
-        self.shadowed(size, center - self.painter.measure(size, text) / 2, y, text, color);
-    }
-
-    fn shadowed_lines(size: TextSize, center: f32, top: f32, color: Color, lines: ...string) {
-        let height = 12 * size.scale();
-        for at in 0..lines.count {
-            self.shadowed_centered(size, center, top + at * height, lines[at], color);
         }
     }
 }

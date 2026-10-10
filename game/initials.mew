@@ -1,0 +1,66 @@
+#load "snake.mew"
+
+use system;
+
+pub type Initials {
+    field letters: i32[];
+    pub mut field cursor: i32;
+
+    pub field count: i32 {
+        get { return self.letters.count; }
+    }
+
+    pub field text: string {
+        get {
+            let mut text = "";
+            for at in 0..self.letters.count {
+                text = text + self.letter(at);
+            }
+
+            return text;
+        }
+    }
+
+    pub static fn new() -> Initials {
+        return new Initials { letters: new i32[3], cursor: 0 };
+    }
+
+    pub fn letter(index: i32) -> string {
+        return $"{"ABCDEFGHIJKLMNOPQRSTUVWXYZ".chars()[self.letters[index]]}";
+    }
+
+    pub fn restart() {
+        self.cursor = 0;
+    }
+
+    pub fn steer(direction: Direction) {
+        match direction {
+            .up => {
+                self.turn(1);
+            },
+            .down => {
+                self.turn(-1);
+            },
+            .left => {
+                self.cursor = Math::Max(0, self.cursor - 1);
+            },
+            .right => {
+                self.cursor = Math::Min(self.letters.count - 1, self.cursor + 1);
+            },
+        }
+    }
+
+    pub fn advance() -> bool {
+        if self.cursor == self.letters.count - 1 {
+            return true;
+        }
+
+        self.cursor += 1;
+        return false;
+    }
+
+    fn turn(step: i32) {
+        let alphabet = 26;
+        self.letters[self.cursor] = (self.letters[self.cursor] + step + alphabet) % alphabet;
+    }
+}
