@@ -50,6 +50,14 @@ pub type Ring<T> {
         self.size += 1;
     }
 
+    pub fn keep(item: T) {
+        if self.is_full() {
+            self.pop_front();
+        }
+
+        self.push_back(item);
+    }
+
     pub fn pop_front() -> T {
         let item = self.first();
         self.start = self.wrap(self.start + 1);
@@ -61,6 +69,15 @@ pub type Ring<T> {
         let item = self.last();
         self.size -= 1;
         return item;
+    }
+
+    pub fn copy() -> Ring<T> {
+        let items = new T[self.items.count];
+        for at in 0..items.count {
+            items[at] = self.items[at];
+        }
+
+        return new Ring<T> { items: items, start: self.start, size: self.size };
     }
 
     pub fn clear() {

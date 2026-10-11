@@ -1,0 +1,323 @@
+#load "../engine/audio.mew"
+#load "../world/game.mew"
+#load "../world/season.mew"
+#load "music.mew"
+
+use engine;
+use system;
+
+pub union Cue {
+    start,
+    pause,
+    resume,
+    tick,
+    choose,
+    fanfare,
+    sigh,
+    firework,
+    victory,
+    rewind,
+}
+
+// Sounds on different voices play over each other, and one on the same voice
+// cuts the one before it short.
+union Voice {
+    bites,
+    crash,
+    pops,
+    menu,
+    jingles,
+    music,
+    song,
+}
+
+impl Voice {
+    pub static fn all() -> Voice[] {
+        return new Voice[] { .bites, .crash, .pops, .menu, .jingles, .music, .song };
+    }
+
+    pub fn index() -> i32 {
+        return match self {
+            .bites => 0,
+            .crash => 1,
+            .pops => 2,
+            .menu => 3,
+            .jingles => 4,
+            .music => 5,
+            .song => 6,
+        };
+    }
+}
+
+pub type Sounds {
+    field speaker: Speaker;
+    field music: Music;
+    field bites: Sound[];
+    field golden: Sound;
+    field faded: Sound;
+    field power: Sound;
+    field warp: Sound;
+    field crash: Sound;
+    field pops: Sound[];
+    field start: Sound;
+    field pause: Sound;
+    field resume: Sound;
+    field tick: Sound;
+    field choose: Sound;
+    field fanfare: Sound;
+    field sigh: Sound;
+    field frenzy: Sound;
+    field firework: Sound;
+    field victory: Sound;
+    field squeak: Sound;
+    field ribbit: Sound;
+    field chime: Sound;
+    field catches: Sound[];
+    field escaped: Sound;
+    field rewind: Sound;
+
+    pub static fn open() -> Sounds {
+        let pops = new Sound[8];
+        for at in 0..pops.count {
+            let pitch = 1100.0 - (at as f64) * 70.0;
+            pops[at] = Sound::tone(.noise, 7000.0, 1800.0, 70.0, 0.24).with(Sound::tone(.square, pitch, pitch * 0.6, 80.0, 0.1));
+        }
+
+        let steps = new f64[] { 1.0, 1.125, 1.25, 1.333, 1.5 };
+        let bites = new Sound[steps.count];
+        for at in 0..steps.count {
+            let up = steps[at];
+            bites[at] = Sound::tone(.square, 660.0 * up, 990.0 * up, 45.0, 0.1).then(Sound::tone(.square, 990.0 * up, 1320.0 * up, 55.0, 0.1));
+        }
+
+        let squeak = Sound::tone(.sine, 2600.0, 3400.0, 45.0, 0.14).then(Sound::rest(35.0)).then(Sound::tone(.sine, 2800.0, 3700.0, 60.0, 0.14));
+        let ribbit = Sound::tone(.square, 320.0, 230.0, 70.0, 0.1).then(Sound::rest(40.0)).then(Sound::tone(.square, 280.0, 190.0, 100.0, 0.1));
+        let chime = Sound::tone(.triangle, 1760.0, 2093.0, 80.0, 0.16).then(Sound::tone(.triangle, 2349.0, 2349.0, 140.0, 0.16));
+        let caught = notes(.square, 0.1, 50.0, 784.0, 1047.0, 1319.0, 1568.0);
+        let speaker = Speaker::open(voices: Voice::all().count);
+        return new Sounds {
+            speaker: speaker,
+            music: Music::new(speaker, Voice::music.index()),
+            bites: bites,
+            golden: notes(.square, 0.1, 60.0, 784.0, 988.0, 1175.0, 1568.0).then(Sound::tone(.triangle, 2093.0, 2093.0, 160.0, 0.18)),
+            faded: Sound::tone(.triangle, 880.0, 330.0, 280.0, 0.2),
+            warp: Sound::tone(.sine, 1200.0, 300.0, 120.0, 0.22).then(Sound::tone(.sine, 300.0, 1400.0, 160.0, 0.22)),
+            power: Sound::tone(.sine, 500.0, 1500.0, 160.0, 0.25).then(Sound::tone(.triangle, 1500.0, 2100.0, 140.0, 0.18)),
+            // Small speakers hardly play anything low, so the crash keeps
+            // plenty of crackle up high.
+            crash: Sound::tone(.noise, 9000.0, 1200.0, 420.0, 0.38).with(Sound::tone(.square, 520.0, 110.0, 300.0, 0.14)),
+            pops: pops,
+            start: notes(.triangle, 0.22, 70.0, 523.0, 784.0).then(Sound::tone(.triangle, 1047.0, 1047.0, 140.0, 0.22)),
+            pause: notes(.triangle, 0.2, 70.0, 660.0, 440.0),
+            resume: notes(.triangle, 0.2, 70.0, 440.0, 660.0),
+            tick: Sound::tone(.square, 1400.0, 1400.0, 18.0, 0.06),
+            choose: notes(.triangle, 0.2, 45.0, 990.0, 1320.0),
+            fanfare: notes(.square, 0.09, 90.0, 523.0, 659.0, 784.0, 1047.0, 0.0, 784.0).then(Sound::tone(.square, 1047.0, 1047.0, 320.0, 0.09)),
+            victory: victory(),
+            squeak: squeak,
+            ribbit: ribbit,
+            chime: chime,
+            catches: new Sound[] { caught.then(squeak), caught.then(ribbit), caught.then(chime) },
+            escaped: Sound::tone(.sine, 3400.0, 2200.0, 90.0, 0.1).then(Sound::tone(.noise, 6000.0, 3000.0, 80.0, 0.05)),
+            rewind: Sound::tone(.square, 1800.0, 300.0, 280.0, 0.06).with(Sound::tone(.noise, 6000.0, 2000.0, 280.0, 0.05)),
+            firework: Sound::tone(.noise, 7000.0, 2500.0, 90.0, 0.2).then(Sound::tone(.noise, 9000.0, 6000.0, 220.0, 0.07)),
+            frenzy: notes(.square, 0.1, 45.0, 523.0, 659.0, 784.0, 1047.0, 784.0, 1047.0, 1319.0).then(Sound::tone(.square, 1568.0, 1568.0, 200.0, 0.1)),
+            sigh: notes(.triangle, 0.2, 150.0, 392.0, 330.0).then(Sound::tone(.triangle, 262.0, 247.0, 360.0, 0.2)),
+        };
+    }
+
+    static fn victory() -> Sound {
+        let step = 100.0;
+        let song = Sound::rest(step * 64.0 + 800.0);
+
+        // Each note of the lead is a pitch and how many sixteenths it lasts.
+        let lead = new i32[] {
+            72, 1, 76, 1, 79, 1, 84, 5, 79, 2, 84, 6,
+            81, 2, 79, 2, 77, 2, 76, 2, 74, 2, 76, 2, 77, 2, 79, 2,
+            81, 2, 83, 2, 84, 4, 83, 2, 79, 2, 81, 2, 83, 2,
+            84, 4, 79, 2, 76, 2, 84, 8,
+        };
+        let mut at = 0;
+        for index in 0..lead.count / 2 {
+            let pitch = Sound::pitch(lead[index * 2]);
+            let length = lead[index * 2 + 1] * step;
+            song.add(Sound::tone(.square, pitch, pitch, length * 0.95, 0.08).with(Sound::tone(.triangle, pitch / 2.0, pitch / 2.0, length * 0.95, 0.1)), at * step);
+            at += lead[index * 2 + 1];
+        }
+
+        let bass = new i32[] { 48, 48, 43, 48, 41, 41, 48, 43, 41, 43, 45, 43, 48, 43, 48, 48 };
+        for beat in 0..bass.count {
+            let pitch = Sound::pitch(bass[beat]);
+            song.add(Sound::tone(.triangle, pitch, pitch, step * 3.6, 0.16), beat * 4 * step);
+        }
+
+        for sixteenth in 0..64 {
+            let time = sixteenth * step;
+            if sixteenth % 8 == 0 {
+                song.add(Sound::tone(.sine, 150.0, 45.0, 110.0, 0.3), time);
+            }
+
+            if sixteenth % 8 == 4 {
+                song.add(Sound::tone(.noise, 3000.0, 1200.0, 90.0, 0.09), time);
+            }
+
+            if sixteenth % 2 == 0 {
+                song.add(Sound::tone(.noise, 9000.0, 9000.0, 25.0, 0.03), time);
+            }
+        }
+
+        song.add(Sound::tone(.noise, 8000.0, 3000.0, 700.0, 0.12), 60.0 * step);
+        return song;
+    }
+
+    // A pitch of nothing is a rest.
+    static fn notes(wave: Wave, volume: f64, milliseconds: f64, pitches: ...f64) -> Sound {
+        let mut sound = Sound::rest(0.0);
+        for pitch in pitches {
+            if pitch == 0.0 {
+                sound = sound.then(Sound::rest(milliseconds));
+            } else {
+                sound = sound.then(Sound::tone(wave, pitch, pitch, milliseconds, volume));
+            }
+        }
+
+        return sound;
+    }
+
+    pub fn react(game: Game) {
+        for moment in game.moments {
+            match moment {
+                .ate(bite) => {
+                    if bite.fruit.is_golden() {
+                        self.play_on(.bites, self.golden);
+                    } else {
+                        self.play_on(.bites, self.bites[bite.combo - 1]);
+                    }
+                },
+                .faded(_) => {
+                    self.play_on(.bites, self.faded);
+                },
+                .powered(_, _) => {
+                    self.play_on(.bites, self.power);
+                },
+                .warped(_, _) => {
+                    self.play_on(.crash, self.warp);
+                },
+                .frenzy_began => {
+                    self.play_on(.jingles, self.frenzy);
+                },
+                .vanished(_) | .season_turned(_) => { },
+                .appeared(_, animal) => {
+                    self.play_on(.pops, self.call(animal));
+                },
+                .caught(_, animal, _) => {
+                    self.play_on(.bites, self.catches[animal.index()]);
+                },
+                .escaped(_) => {
+                    self.play_on(.pops, self.escaped);
+                },
+                .crashed(_) => {
+                    self.play_on(.crash, self.crash);
+                },
+            }
+        }
+    }
+
+    fn call(animal: Animal) -> Sound {
+        return match animal {
+            .mouse => self.squeak,
+            .frog => self.ribbit,
+            .butterfly => self.chime,
+        };
+    }
+
+    // Music and sounds each have a volume of their own, from nothing to one.
+    // The song for a new best is music too, so it goes as loud as the music
+    // does.
+    pub fn set_volume(music: f32, sounds: f32) {
+        self.music.set_loudness(music);
+        self.speaker.volume(Voice::song.index(), music);
+        for voice in Voice::all() {
+            if voice.index() != Voice::music.index() && voice.index() != Voice::song.index() {
+                self.speaker.volume(voice.index(), sounds);
+            }
+        }
+    }
+
+    pub fn begin_music(season: Season) {
+        self.music.begin(season.index());
+    }
+
+    pub fn play_music() {
+        self.music.play();
+    }
+
+    pub fn stop_music() {
+        self.music.stop();
+    }
+
+    pub fn stop_song() {
+        self.speaker.stop(Voice::song.index());
+    }
+
+    pub fn follow(game: Game) {
+        let mut pace = game.step_time();
+        if game.frenzy_left() > 0.0 {
+            pace *= 0.75;
+        }
+
+        self.music.follow(pace);
+        self.music.choose(game.season().index());
+    }
+
+    pub fn update(milliseconds: f64) {
+        self.music.update(milliseconds);
+    }
+
+    pub fn close() {
+        self.speaker.close();
+    }
+
+    pub fn pop(index: i32) {
+        self.play_on(.pops, self.pops[index % self.pops.count]);
+    }
+
+    pub fn play(cue: Cue) {
+        match cue {
+            .start => {
+                self.play_on(.menu, self.start);
+            },
+            .pause => {
+                self.play_on(.menu, self.pause);
+            },
+            .resume => {
+                self.play_on(.menu, self.resume);
+            },
+            .tick => {
+                self.play_on(.menu, self.tick);
+            },
+            .choose => {
+                self.play_on(.menu, self.choose);
+            },
+            .fanfare => {
+                self.play_on(.jingles, self.fanfare);
+            },
+            .sigh => {
+                self.play_on(.jingles, self.sigh);
+            },
+            .firework => {
+                self.play_on(.pops, self.firework);
+            },
+            .victory => {
+                self.play_on(.song, self.victory);
+            },
+            .rewind => {
+                self.play_on(.menu, self.rewind);
+            },
+        }
+    }
+
+    fn play_on(voice: Voice, sound: Sound) {
+        self.speaker.play(sound, voice.index());
+    }
+}

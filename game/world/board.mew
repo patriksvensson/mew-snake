@@ -1,0 +1,85 @@
+use system;
+
+pub union Direction {
+    up,
+    down,
+    left,
+    right,
+}
+
+impl Direction {
+    pub static fn all() -> Direction[] {
+        return new Direction[] { .up, .down, .left, .right };
+    }
+
+    pub fn dx() -> i32 {
+        return match self {
+            .left => -1,
+            .right => 1,
+            _ => 0,
+        };
+    }
+
+    pub fn dy() -> i32 {
+        return match self {
+            .up => -1,
+            .down => 1,
+            _ => 0,
+        };
+    }
+
+    pub fn same(other: Direction) -> bool {
+        return self.dx() == other.dx() && self.dy() == other.dy();
+    }
+
+    pub fn reverses(other: Direction) -> bool {
+        return self.dx() == -other.dx() && self.dy() == -other.dy();
+    }
+
+    pub fn is_turn_from(heading: Direction) -> bool {
+        return !self.same(heading) && !self.reverses(heading);
+    }
+}
+
+[struct]
+pub type Cell {
+    pub field x: i32;
+    pub field y: i32;
+
+    pub fn next(direction: Direction) -> Cell {
+        return new Cell { x: self.x + direction.dx(), y: self.y + direction.dy() };
+    }
+
+    pub fn same(other: Cell) -> bool {
+        return self.x == other.x && self.y == other.y;
+    }
+
+    pub fn distance(other: Cell) -> i32 {
+        return Math::Abs(self.x - other.x) + Math::Abs(self.y - other.y);
+    }
+}
+
+pub type Board {
+    pub field columns: i32 = 24;
+    pub field rows: i32 = 18;
+
+    pub fn count() -> i32 {
+        return self.columns * self.rows;
+    }
+
+    pub fn contains(cell: Cell) -> bool {
+        return cell.x >= 0 && cell.x < self.columns && cell.y >= 0 && cell.y < self.rows;
+    }
+
+    pub fn index(cell: Cell) -> i32 {
+        return cell.y * self.columns + cell.x;
+    }
+
+    pub fn wrap(cell: Cell) -> Cell {
+        return new Cell { x: (cell.x + self.columns) % self.columns, y: (cell.y + self.rows) % self.rows };
+    }
+
+    pub fn cell_at(index: i32) -> Cell {
+        return new Cell { x: index % self.columns, y: index / self.columns };
+    }
+}

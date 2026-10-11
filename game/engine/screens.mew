@@ -14,6 +14,10 @@ impl Screen<T> {
     pub fn is_transparent() -> bool {
         return false;
     }
+
+    pub fn enter() { }
+
+    pub fn leave() { }
 }
 
 pub union Transition<T> {
@@ -39,7 +43,6 @@ pub type Screens<T> {
         return self.depth == 0;
     }
 
-    // Only the screen on top takes commands.
     pub fn handle(command: T) {
         if !self.is_empty() {
             self.apply(self.top().handle(command));
@@ -51,7 +54,8 @@ pub type Screens<T> {
             return;
         }
 
-        // The screens below the top only move on, since changing the stack is up to the top one.
+        // The screens below the top only move on, since changing the stack is
+        // up to the top one.
         for at in self.base()..self.depth - 1 {
             self.stack.get(at).update(milliseconds);
         }
@@ -69,7 +73,6 @@ pub type Screens<T> {
         return self.stack.get(self.depth - 1);
     }
 
-    // The lowest screen still in sight, seen through every transparent one above it.
     fn base() -> i32 {
         let mut base = Math::Max(0, self.depth - 1);
         while base > 0 && self.stack.get(base).is_transparent() {
@@ -86,18 +89,18 @@ pub type Screens<T> {
                 self.push(screen);
             },
             .pop => {
-                self.depth -= 1;
+                self.pop();
             },
             .swap(screen) => {
-                self.depth -= 1;
+                self.pop();
                 self.push(screen);
             },
             .reset(screen) => {
-                self.depth = 0;
+                self.clear();
                 self.push(screen);
             },
             .quit => {
-                self.depth = 0;
+                self.clear();
             },
         }
     }
@@ -111,5 +114,17 @@ pub type Screens<T> {
         }
 
         self.depth += 1;
+        screen.enter();
+    }
+
+    fn pop() {
+        self.top().leave();
+        self.depth -= 1;
+    }
+
+    fn clear() {
+        while !self.is_empty() {
+            self.pop();
+        }
     }
 }

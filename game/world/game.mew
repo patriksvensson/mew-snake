@@ -1,0 +1,803 @@
+#load "../engine/random.mew"
+#load "autopilot.mew"
+#load "board.mew"
+#load "critter.mew"
+#load "fruit.mew"
+#load "level.mew"
+#load "pilot.mew"
+#load "power.mew"
+#load "season.mew"
+#load "snake.mew"
+
+use engine;
+use std.collections;
+use system;
+
+pub union Moment {
+    ate(Bite),
+    faded(Cell),
+    powered(Cell, Power),
+    warped(Cell, Cell),
+    frenzy_began,
+    vanished(Cell),
+    // An animal turned up, was caught for so many points, or ran off.
+    appeared(Cell, Animal),
+    caught(Cell, Animal, i32),
+    escaped(Cell),
+    season_turned(Season),
+    crashed(Cell),
+}
+
+[struct]
+pub type Treat {
+    pub field cell: Cell;
+    pub field fruit: Fruit;
+}
+
+[struct]
+pub type PowerUp {
+    pub field cell: Cell;
+    pub field power: Power;
+    pub mut field left: f64;
+}
+
+[struct]
+pub type Bite {
+    pub field cell: Cell;
+    pub field fruit: Fruit;
+    pub field points: i32;
+    pub field combo: i32;
+}
+
+pub type Game {
+    field board: Board;
+    field random: Random;
+    field player: Player;
+    field pilot: Pilot;
+    pub field snake: Snake;
+    pub field level: Level;
+    pub field critter: Critter;
+    pub field moments: List<Moment>;
+    pub field demo: bool;
+    mut field food: Cell;
+    mut field fruit: Fruit;
+    mut field golden_left: f64;
+    mut field item: PowerUp;
+    mut field item_wait: f64;
+    mut field treats: List<Treat>;
+    mut field frenzy_left: f64;
+    mut field frenzy_wait: f64;
+    mut field critter_wait: f64;
+    field powers: f64[];
+    mut field heading: Direction;
+    mut field score: i32;
+    mut field bites: i32;
+    mut field streak: i32;
+    mut field since_bite: i32;
+    mut field time: f64;
+    mut field won: bool;
+    mut field over: bool;
+    mut field paused: bool;
+    mut field easy: bool;
+    mut field eased: bool;
+    mut field interval: f64;
+    mut field elapsed: f64;
+    mut field redoable: bool;
+    mut field steps: i32;
+
+    pub static fn play(board: Board, random: Random, easy: bool, skin: Skin) -> Game {
+        let player = Player::new();
+        return new(board, random, player, player, demo: false, easy: easy, skin: skin);
+    }
+
+    pub static fn demo(board: Board, random: Random, autopilot: Autopilot, skin: Skin) -> Game {
+        return new(board, random, Player::new(), autopilot, demo: true, easy: false, skin: skin);
+    }
+
+    static fn new(board: Board, random: Random, player: Player, pilot: Pilot, demo: bool, easy: bool, skin: Skin) -> Game {
+        let start = new Cell { x: 6, y: board.rows / 2 };
+        let game = new Game {
+            board: board,
+            random: random,
+            player: player,
+            pilot: pilot,
+            snake: Snake::new(board, start, length: 4, skin: skin),
+            level: Level::new(board),
+            critter: Critter::new(board, random),
+            moments: List<Moment>::new(),
+            demo: demo,
+            food: start,
+            fruit: .apple,
+            golden_left: 0.0,
+            item: new PowerUp { cell: start, power: .slow, left: 0.0 },
+            item_wait: 12000.0,
+            treats: List<Treat>::new(),
+            frenzy_left: 0.0,
+            frenzy_wait: Chance::between(random, 30000.0, 50000.0),
+            critter_wait: Chance::between(random, 15000.0, 25000.0),
+            powers: new f64[Power::all().count],
+            heading: .right,
+            score: 0,
+            bites: 0,
+            streak: 0,
+            since_bite: 1000,
+            time: 0.0,
+            won: false,
+            over: false,
+            paused: false,
+            easy: easy,
+            eased: easy,
+            interval: 0.0,
+            elapsed: 0.0,
+            redoable: false,
+            steps: 0,
+        };
+
+        game.level.build(game.season().index(), easy);
+        game.pace();
+        game.place_food();
+        return game;
+    }
+
+    // Nothing changes a snapshot once it is taken, so a snake or walls that
+    // have not changed since the one before are shared with it.
+    pub fn snapshot(before: Option<Game>) -> Game {
+        let treats = List<Treat>::new();
+        for treat in self.treats {
+            treats.add(treat);
+        }
+
+        let moments = List<Moment>::new();
+        for moment in self.moments {
+            moments.add(moment);
+        }
+
+        let powers = new f64[self.powers.count];
+        for at in 0..powers.count {
+            powers[at] = self.powers[at];
+        }
+
+        return new Game {
+            board: self.board,
+            random: self.random,
+            player: self.player,
+            pilot: self.pilot,
+            snake: self.snake_since(before),
+            level: self.level_since(before),
+            critter: self.critter.copy(),
+            moments: moments,
+            demo: self.demo,
+            food: self.food,
+            fruit: self.fruit,
+            golden_left: self.golden_left,
+            item: self.item,
+            item_wait: self.item_wait,
+            treats: treats,
+            frenzy_left: self.frenzy_left,
+            frenzy_wait: self.frenzy_wait,
+            critter_wait: self.critter_wait,
+            powers: powers,
+            heading: self.heading,
+            score: self.score,
+            bites: self.bites,
+            streak: self.streak,
+            since_bite: self.since_bite,
+            time: self.time,
+            won: self.won,
+            over: self.over,
+            paused: self.paused,
+            easy: self.easy,
+            eased: self.eased,
+            interval: self.interval,
+            elapsed: self.elapsed,
+            redoable: self.redoable,
+            steps: self.steps,
+        };
+    }
+
+    // The snake only changes when it takes a step.
+    fn snake_since(before: Option<Game>) -> Snake {
+        if let .some(earlier) = before {
+            if earlier.steps == self.steps {
+                return earlier.snake;
+            }
+        }
+
+        return self.snake.copy();
+    }
+
+    fn level_since(before: Option<Game>) -> Level {
+        if let .some(earlier) = before {
+            if earlier.level.changes() == self.level.changes() {
+                return earlier.level;
+            }
+        }
+
+        return self.level.copy();
+    }
+
+    pub fn food() -> Cell {
+        return self.food;
+    }
+
+    pub fn fruit() -> Fruit {
+        return self.fruit;
+    }
+
+    pub fn heading() -> Direction {
+        return self.heading;
+    }
+
+    pub fn score() -> i32 {
+        return self.score;
+    }
+
+    pub fn combo() -> i32 {
+        if self.since_bite <= combo_steps() {
+            return Math::Max(1, self.streak);
+        }
+
+        return 1;
+    }
+
+    pub fn combo_left() -> f32 {
+        return Math::Max(0.0, 1.0 - (self.since_bite as f32) / combo_steps());
+    }
+
+    pub fn treats() -> Treat[] {
+        return self.treats.to_array();
+    }
+
+    pub fn frenzy_left() -> f64 {
+        return self.frenzy_left;
+    }
+
+    pub fn power_up() -> Option<PowerUp> {
+        if self.item.left > 0.0 {
+            return .some(self.item);
+        }
+
+        return .none;
+    }
+
+    pub fn power_left(power: Power) -> f64 {
+        return self.powers[power.index()];
+    }
+
+    pub fn season() -> Season {
+        return Season::of(self.score);
+    }
+
+    pub fn time() -> f64 {
+        return self.time;
+    }
+
+    // A game that was easy at any point goes on the easy list, however it
+    // ended.
+    pub fn counts_as_easy() -> bool {
+        return self.eased;
+    }
+
+    pub fn has_won() -> bool {
+        return self.won;
+    }
+
+    pub fn is_over() -> bool {
+        return self.over;
+    }
+
+    pub fn is_paused() -> bool {
+        return self.paused;
+    }
+
+    pub fn is_easy() -> bool {
+        return self.easy;
+    }
+
+    pub fn step_time() -> f64 {
+        return self.interval;
+    }
+
+    pub fn progress() -> f32 {
+        return Math::Min(1.0, self.elapsed / self.interval) as f32;
+    }
+
+    pub fn shine() -> f32 {
+        return (self.golden_left / golden_time()) as f32;
+    }
+
+    pub fn blocks(cell: Cell) -> bool {
+        if self.level.blocks(cell) {
+            return true;
+        }
+
+        if self.power_left(.ghost) > 0.0 {
+            return !self.board.contains(cell);
+        }
+
+        return self.snake.blocks(cell, self.is_fruit(cell) || self.is_critter(cell));
+    }
+
+    pub fn steer(direction: Direction) {
+        if !self.redo_step(direction) {
+            self.player.queue(direction, self.heading);
+        }
+    }
+
+    pub fn pause() {
+        self.paused = true;
+    }
+
+    pub fn resume() {
+        self.paused = false;
+    }
+
+    pub fn set_easy(easy: bool) {
+        self.easy = easy;
+        self.eased = self.eased || easy;
+        self.level.build(self.level.number(), easy);
+    }
+
+    pub fn update(milliseconds: f64) {
+        self.moments.clear();
+        if self.over || self.paused {
+            return;
+        }
+
+        self.time += milliseconds;
+        self.pace();
+        self.follow_level(milliseconds);
+        self.wear_powers(milliseconds);
+        self.wear_frenzy(milliseconds);
+        self.wear_critter(milliseconds);
+        if self.fade_golden(milliseconds) {
+            self.moments.add(.faded(self.food));
+        }
+
+        self.elapsed += milliseconds;
+        while self.elapsed >= self.interval && !self.over {
+            self.elapsed -= self.interval;
+            self.step();
+        }
+    }
+
+    fn pace() {
+        self.interval = Pace::of(self.easy).interval(self.bites);
+        if self.power_left(.slow) > 0.0 {
+            self.interval *= 1.6;
+        }
+    }
+
+    fn follow_level(milliseconds: f64) {
+        let season = self.season();
+        if season.index() != self.level.number() {
+            self.level.build(season.index(), self.easy);
+            self.moments.add(.season_turned(season));
+            if !self.level.is_free(self.food) {
+                self.place_food();
+            }
+
+            if self.item.left > 0.0 && !self.level.is_free(self.item.cell) {
+                self.item.left = 0.0;
+            }
+
+            if self.critter.is_here() && !self.level.is_free(self.critter.cell()) {
+                self.critter.leave();
+            }
+        }
+
+        self.level.update(milliseconds, |cell| self.snake.occupies(cell) || cell.same(self.food) || self.has_item_at(cell) || self.is_critter(cell));
+    }
+
+    fn wear_critter(milliseconds: f64) {
+        if self.critter.is_here() {
+            let flies = self.critter.animal().flies();
+            if self.critter.update(milliseconds, self.interval, self.snake.head(), |cell: Cell| self.lets_in(cell, flies)) {
+                self.moments.add(.escaped(self.critter.cell()));
+                self.critter_wait = self.critter_pause();
+            }
+
+            return;
+        }
+
+        if self.demo || self.score < 4 {
+            return;
+        }
+
+        self.critter_wait -= milliseconds;
+        if self.critter_wait > 0.0 {
+            return;
+        }
+
+        self.critter_wait = self.critter_pause();
+        let animal = Animal::any(self.random);
+        if let .some(cell) = self.far_cell() {
+            self.critter.arrive(animal, cell, 14000.0);
+            self.moments.add(.appeared(cell, animal));
+        }
+    }
+
+    fn critter_pause() -> f64 {
+        return Chance::between(self.random, 25000.0, 40000.0);
+    }
+
+    fn far_cell() -> Option<Cell> {
+        let mut far: Option<Cell> = .none;
+        let mut distance = -1;
+        for at in 0..24 {
+            if let .some(cell) = self.free_cell() {
+                if !cell.same(self.food) && cell.distance(self.snake.head()) > distance {
+                    far = .some(cell);
+                    distance = cell.distance(self.snake.head());
+                }
+            }
+        }
+
+        return far;
+    }
+
+    fn lets_in(cell: Cell, flies: bool) -> bool {
+        if flies {
+            return !self.snake.occupies(cell) && !self.is_fruit(cell) && !self.has_item_at(cell);
+        }
+
+        return self.is_open(cell) && !cell.same(self.food);
+    }
+
+    fn has_item_at(cell: Cell) -> bool {
+        return self.item.left > 0.0 && cell.same(self.item.cell);
+    }
+
+    fn is_critter(cell: Cell) -> bool {
+        return self.critter.is_here() && cell.same(self.critter.cell());
+    }
+
+    // An animal is worth a lot, though it does not count toward a combo.
+    fn catch_critter(cell: Cell) {
+        let animal = self.critter.animal();
+        self.critter.leave();
+        self.critter_wait = self.critter_pause();
+        let mut points = 0;
+        if !self.demo {
+            points = animal.points();
+            self.score += points;
+        }
+
+        self.moments.add(.caught(cell, animal, points));
+    }
+
+    fn wear_frenzy(milliseconds: f64) {
+        if self.frenzy_left > 0.0 {
+            self.frenzy_left -= milliseconds;
+            if self.frenzy_left <= 0.0 {
+                self.end_frenzy();
+            }
+
+            return;
+        }
+
+        if self.demo || self.score < 5 {
+            return;
+        }
+
+        self.frenzy_wait -= milliseconds;
+        if self.frenzy_wait > 0.0 {
+            return;
+        }
+
+        self.frenzy_wait = Chance::between(self.random, 50000.0, 90000.0);
+        for at in 0..12 {
+            if let .some(cell) = self.free_cell() {
+                if !cell.same(self.food) {
+                    self.treats.add(new Treat { cell: cell, fruit: Fruit::ordinary(self.random) });
+                }
+            }
+        }
+
+        if self.treats.count() > 0 {
+            self.frenzy_left = 6000.0;
+            self.moments.add(.frenzy_began);
+        }
+    }
+
+    fn end_frenzy() {
+        for treat in self.treats {
+            self.moments.add(.vanished(treat.cell));
+        }
+
+        self.treats.clear();
+        self.frenzy_left = 0.0;
+    }
+
+    fn treat_at(cell: Cell) -> i32 {
+        for at in 0..self.treats.count() {
+            if self.treats.get(at).cell.same(cell) {
+                return at;
+            }
+        }
+
+        return -1;
+    }
+
+    fn is_fruit(cell: Cell) -> bool {
+        return cell.same(self.food) || self.treat_at(cell) >= 0;
+    }
+
+    fn wear_powers(milliseconds: f64) {
+        for at in 0..self.powers.count {
+            self.powers[at] = Math::Max(0.0, self.powers[at] - milliseconds);
+        }
+
+        if self.item.left > 0.0 {
+            self.item.left = Math::Max(0.0, self.item.left - milliseconds);
+            return;
+        }
+
+        if self.demo || self.score < 3 {
+            return;
+        }
+
+        self.item_wait -= milliseconds;
+        if self.item_wait <= 0.0 {
+            self.place_item();
+        }
+    }
+
+    fn place_item() {
+        self.item_wait = Chance::between(self.random, 15000.0, 25000.0);
+        if let .some(cell) = self.free_cell() {
+            if !cell.same(self.food) {
+                self.item = new PowerUp { cell: cell, power: Power::any(self.random), left: 8000.0 };
+            }
+        }
+    }
+
+    fn take_item() {
+        let item = self.item;
+        self.item.left = 0.0;
+        self.moments.add(.powered(item.cell, item.power));
+        match item.power {
+            .shrink => {
+                self.snake.shrink(Math::Max(4, self.snake.length / 2));
+            },
+            _ => {
+                self.powers[item.power.index()] = item.power.lasts();
+            },
+        }
+    }
+
+    fn pull_food() {
+        let head = self.snake.head();
+        let distance = head.distance(self.food);
+        if distance <= 1 || distance > 6 {
+            return;
+        }
+
+        let mut next = self.food;
+        if Math::Abs(head.x - self.food.x) >= Math::Abs(head.y - self.food.y) {
+            next = new Cell { x: self.food.x + Math::Sign(head.x - self.food.x), y: self.food.y };
+        } else {
+            next = new Cell { x: self.food.x, y: self.food.y + Math::Sign(head.y - self.food.y) };
+        }
+
+        if self.is_open(next) {
+            self.food = next;
+        }
+    }
+
+    fn step() {
+        self.steps += 1;
+        self.since_bite += 1;
+        let before = self.heading;
+
+        self.heading = self.pilot.steer(self);
+
+        let moved = self.move_head();
+        self.redoable = moved && self.heading.same(before);
+        if self.power_left(.magnet) > 0.0 && !self.over {
+            self.pull_food();
+        }
+    }
+
+    fn can_redo(direction: Direction) -> bool {
+        return self.redoable && self.elapsed < self.interval * 0.25 && direction.is_turn_from(self.heading);
+    }
+
+    fn redo_step(direction: Direction) -> bool {
+        if !self.can_redo(direction) {
+            return false;
+        }
+
+        self.snake.retreat();
+        self.steps += 1;
+        self.heading = direction;
+        self.redoable = false;
+        self.move_head();
+        return true;
+    }
+
+    fn move_head() -> bool {
+        let mut next = self.snake.head().next(self.heading);
+        if self.easy {
+            next = self.board.wrap(next);
+        }
+
+        if self.board.contains(next) {
+            if let .some(exit) = self.level.portal(next) {
+                self.moments.add(.warped(next, exit));
+                next = exit;
+            }
+        }
+
+        if self.blocks(next) {
+            self.crash();
+            return false;
+        }
+
+        let treat = self.treat_at(next);
+        let caught = self.is_critter(next);
+        let growing = self.is_fruit(next) || caught;
+        self.snake.advance(next, growing);
+        if self.has_item_at(next) {
+            self.take_item();
+        }
+
+        if caught {
+            self.catch_critter(next);
+        }
+
+        if next.same(self.food) {
+            self.eat();
+        } else if treat >= 0 {
+            self.eat_treat(treat);
+        }
+
+        return !growing;
+    }
+
+    // Only the fruit that is always there speeds the snake up, so a frenzy is
+    // not followed by a sudden rush.
+    fn eat() {
+        if !self.demo {
+            self.bites += 1;
+        }
+
+        self.bite(self.food, self.fruit);
+        if !self.place_food() {
+            self.won = true;
+            self.over = true;
+        }
+    }
+
+    fn eat_treat(index: i32) {
+        let treat = self.treats.get(index);
+        let rest = List<Treat>::new();
+        for at in 0..self.treats.count() {
+            if at != index {
+                rest.add(self.treats.get(at));
+            }
+        }
+
+        self.treats = rest;
+        self.bite(treat.cell, treat.fruit);
+
+        if self.treats.count() == 0 {
+            self.frenzy_left = 0.0;
+        }
+    }
+
+    fn bite(cell: Cell, fruit: Fruit) {
+        if self.since_bite <= combo_steps() {
+            self.streak = Math::Min(self.streak + 1, 5);
+        } else {
+            self.streak = 1;
+        }
+
+        self.since_bite = 0;
+        let mut points = 0;
+        if !self.demo {
+            points = fruit.points() * self.streak;
+            self.score += points;
+        }
+
+        self.moments.add(.ate(new Bite { cell: cell, fruit: fruit, points: points, combo: self.streak }));
+    }
+
+    fn crash() {
+        if !self.demo {
+            self.moments.add(.crashed(self.snake.head()));
+        }
+
+        self.over = true;
+    }
+
+    fn place_food() -> bool {
+        if let .some(cell) = self.free_cell() {
+            self.food = cell;
+            self.fruit = self.pick();
+            return true;
+        }
+
+        return false;
+    }
+
+    fn free_cell() -> Option<Cell> {
+        let mut free = 0;
+        for index in 0..self.board.count() {
+            if self.is_open(self.board.cell_at(index)) {
+                free += 1;
+            }
+        }
+
+        if free == 0 {
+            return .none;
+        }
+
+        let mut skip = self.random.Next(0, free);
+        for index in 0..self.board.count() {
+            let cell = self.board.cell_at(index);
+            if self.is_open(cell) {
+                if skip == 0 {
+                    return .some(cell);
+                }
+
+                skip -= 1;
+            }
+        }
+
+        return .none;
+    }
+
+    fn is_open(cell: Cell) -> bool {
+        return self.level.is_free(cell) && !self.snake.occupies(cell) && !self.has_item_at(cell) && self.treat_at(cell) < 0 && !self.is_critter(cell);
+    }
+
+    fn pick() -> Fruit {
+        if self.snake.length >= 7 && self.random.NextDouble() < 0.15 {
+            self.golden_left = golden_time();
+            return .golden;
+        }
+
+        return Fruit::ordinary(self.random);
+    }
+
+    // Returns true when a golden fruit has just turned into an ordinary one.
+    fn fade_golden(milliseconds: f64) -> bool {
+        if self.fruit.is_golden() {
+            self.golden_left -= milliseconds;
+            if self.golden_left <= 0.0 {
+                self.fruit = Fruit::ordinary(self.random);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    static fn combo_steps() -> i32 {
+        return 24;
+    }
+
+    static fn golden_time() -> f64 {
+        return 6000.0;
+    }
+}
+
+[struct]
+type Pace {
+    pub field start: f64;
+    pub field fastest: f64;
+    pub field quickening: f64;
+
+    pub static fn of(easy: bool) -> Pace {
+        if easy {
+            return new Pace { start: 170.0, fastest: 110.0, quickening: 2.0 };
+        }
+
+        return new Pace { start: 140.0, fastest: 80.0, quickening: 2.0 };
+    }
+
+    pub fn interval(bites: i32) -> f64 {
+        return Math::Max(self.fastest, self.start - bites * self.quickening);
+    }
+}

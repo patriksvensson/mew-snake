@@ -1,0 +1,207 @@
+#load "../engine/color.mew"
+#load "../engine/geometry.mew"
+#load "../engine/random.mew"
+#load "../engine/sokol.mew"
+
+use engine;
+use system;
+
+pub union Trail {
+    none,
+    sparkles,
+    hearts,
+    bubbles,
+}
+
+impl Trail {
+    pub static fn all() -> Trail[] {
+        return new Trail[] { .none, .sparkles, .hearts, .bubbles };
+    }
+
+    pub static fn named(name: string) -> Trail {
+        for trail in all() {
+            if $"{trail}" == name {
+                return trail;
+            }
+        }
+
+        return .none;
+    }
+
+    pub fn index() -> i32 {
+        return match self {
+            .none => 0,
+            .sparkles => 1,
+            .hearts => 2,
+            .bubbles => 3,
+        };
+    }
+
+    pub fn name() -> string {
+        return match self {
+            .none => "NONE",
+            .sparkles => "SPARKLES",
+            .hearts => "HEARTS",
+            .bubbles => "BUBBLES",
+        };
+    }
+
+    pub fn next(step: i32) -> Trail {
+        let trails = all();
+        return trails[(self.index() + step + trails.count) % trails.count];
+    }
+
+    pub fn every() -> f64 {
+        return match self {
+            .none => 0.0,
+            .sparkles => 45.0,
+            .hearts => 170.0,
+            .bubbles => 140.0,
+        };
+    }
+
+    pub fn life() -> f64 {
+        return match self {
+            .none => 0.0,
+            .sparkles => 650.0,
+            .hearts => 1200.0,
+            .bubbles => 1400.0,
+        };
+    }
+}
+
+pub type Trails {
+    field random: Random;
+    field kinds: Trail[];
+    field x: f32[];
+    field y: f32[];
+    field dx: f32[];
+    field dy: f32[];
+    field born: f64[];
+    field sizes: f32[];
+    field colors: Color[];
+    mut field trail: Trail;
+    mut field next: i32;
+    mut field last: f64;
+    mut field clock: f64;
+
+    // A new array of trails starts out holding nulls, so every place is set to
+    // no trail first.
+    pub static fn new(capacity: i32) -> Trails {
+        let kinds = new Trail[capacity];
+        for at in 0..capacity {
+            kinds[at] = .none;
+        }
+
+        return new Trails {
+            random: new Random { },
+            kinds: kinds,
+            x: new f32[capacity],
+            y: new f32[capacity],
+            dx: new f32[capacity],
+            dy: new f32[capacity],
+            born: new f64[capacity],
+            sizes: new f32[capacity],
+            colors: new Color[capacity],
+            trail: .none,
+            next: 0,
+            last: 0.0,
+            clock: 0.0,
+        };
+    }
+
+    pub fn wear(trail: Trail) {
+        self.trail = trail;
+    }
+
+    pub fn update(milliseconds: f64) {
+        let seconds = (milliseconds / 1000.0) as f32;
+        self.clock += milliseconds;
+        for at in 0..self.x.count {
+            self.x[at] += self.dx[at] * seconds;
+            self.y[at] += self.dy[at] * seconds;
+        }
+    }
+
+    pub fn follow(at: Point, color: Color) {
+        let trail = self.trail;
+        if trail.index() == 0 || self.clock - self.last < trail.every() {
+            return;
+        }
+
+        self.last = self.clock;
+        let slot = self.next;
+        self.next = (self.next + 1) % self.x.count;
+        self.kinds[slot] = trail;
+        self.x[slot] = at.x + self.spread(6.0);
+        self.y[slot] = at.y + self.spread(6.0);
+        self.born[slot] = self.clock;
+        match trail {
+            .sparkles => {
+                self.dx[slot] = self.spread(18.0);
+                self.dy[slot] = self.spread(18.0);
+                self.sizes[slot] = 5.0 + Chance::unit(self.random) * 3.0f32;
+                self.colors[slot] = color.mix(Color::rgb(255, 250, 220), 0.65);
+            },
+            .hearts => {
+                self.dx[slot] = self.spread(10.0);
+                self.dy[slot] = -22.0 - Chance::unit(self.random) * 12.0f32;
+                self.sizes[slot] = 4.0 + Chance::unit(self.random) * 2.0f32;
+                self.colors[slot] = Color::rgb(255, 110, 160).mix(Color::rgb(255, 170, 200), Chance::unit(self.random));
+            },
+            .bubbles => {
+                self.dx[slot] = self.spread(8.0);
+                self.dy[slot] = -16.0 - Chance::unit(self.random) * 10.0f32;
+                self.sizes[slot] = 2.5 + Chance::unit(self.random) * 1.5f32;
+                self.colors[slot] = Color::rgb(160, 220, 255);
+            },
+            .none => { },
+        }
+    }
+
+    pub fn draw(painter: Painter) {
+        for at in 0..self.x.count {
+            let kind = self.kinds[at];
+            let life = kind.life();
+            let age = self.clock - self.born[at];
+            if kind.index() == 0 || age >= life {
+                continue;
+            }
+
+            let left = (1.0 - age / life) as f32;
+            let center = new Point { x: self.x[at], y: self.y[at] };
+            let size = self.sizes[at];
+            let color = self.colors[at];
+            match kind {
+                .sparkles => {
+                    let twinkle = (0.6 + Math::Sin(age * 0.03 + at) * 0.4) as f32;
+                    painter.circle(center, size * 0.9f32 * left, color.fade(left * 0.18f32));
+                    painter.sparkle(center, size * left * twinkle + 1.5, color.fade(left));
+                },
+                .hearts => {
+                    let sway = (Math::Sin(age * 0.006 + at) * 3.0) as f32;
+                    draw_heart(painter, center.offset(sway, 0.0), size, color.fade(Math::Min(1.0f32, left * 1.6f32)));
+                },
+                .bubbles => {
+                    let wobble = (Math::Sin(age * 0.008 + at) * 2.5) as f32;
+                    let grown = size * (1.0 + (1.0 - left) * 0.8f32);
+                    let spot = center.offset(wobble, 0.0);
+                    painter.arc(spot, grown, 1.3, 1.0, color.fade(left * 0.9f32));
+                    painter.circle(spot.offset(-grown * 0.35, -grown * 0.35), grown * 0.25, color.fade(left * 0.7f32));
+                },
+                .none => { },
+            }
+        }
+    }
+
+    static fn draw_heart(painter: Painter, center: Point, size: f32, color: Color) {
+        painter.circle(center.offset(-size * 0.5, -size * 0.25), size * 0.56, color);
+        painter.circle(center.offset(size * 0.5, -size * 0.25), size * 0.56, color);
+        painter.triangle(center.offset(-size * 1.04, -size * 0.05), center.offset(size * 1.04, -size * 0.05), center.offset(0.0, size * 1.1), color);
+    }
+
+    fn spread(reach: f32) -> f32 {
+        return Chance::between(self.random, -reach, reach) as f32;
+    }
+
+}

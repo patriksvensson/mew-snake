@@ -1,0 +1,98 @@
+#load "../engine/color.mew"
+#load "palette.mew"
+
+use engine;
+use system;
+
+pub union Skin {
+    green,
+    rainbow,
+    tiger,
+    candy,
+    gold,
+}
+
+impl Skin {
+    pub static fn all() -> Skin[] {
+        return new Skin[] { .green, .rainbow, .tiger, .candy, .gold };
+    }
+
+    pub static fn named(name: string) -> Skin {
+        for skin in all() {
+            if $"{skin}" == name {
+                return skin;
+            }
+        }
+
+        return .green;
+    }
+
+    pub fn index() -> i32 {
+        return match self {
+            .green => 0,
+            .rainbow => 1,
+            .tiger => 2,
+            .candy => 3,
+            .gold => 4,
+        };
+    }
+
+    pub fn next(step: i32, best: i32) -> Skin {
+        let skins = all();
+        let mut at = (self.index() + step + skins.count) % skins.count;
+        while !skins[at].is_unlocked(best) {
+            at = (at + step + skins.count) % skins.count;
+        }
+
+        return skins[at];
+    }
+
+    pub static fn prize() -> i32 {
+        return 20;
+    }
+
+    pub fn is_unlocked(best: i32) -> bool {
+        return match self {
+            .gold => best >= prize(),
+            _ => true,
+        };
+    }
+
+    pub fn name() -> string {
+        return match self {
+            .green => "GREEN",
+            .rainbow => "RAINBOW",
+            .tiger => "TIGER",
+            .candy => "CANDY",
+            .gold => "GOLD",
+        };
+    }
+
+    pub fn color(palette: Palette, at: i32, count: i32, clock: f64) -> Color {
+        let along = (at as f32) / count;
+        return match self {
+            .green => palette.head.mix(palette.tail, along),
+            .rainbow => Color::hsv(((at as f64) * 0.06 - clock * 0.0003) as f32, 0.6, 0.97 - along * 0.2),
+            .tiger => stripe(Color::rgb(255, 160, 45).mix(Color::rgb(205, 105, 25), along), at),
+            .candy => Color::rgb(255, 150, 205).mix(Color::rgb(175, 120, 245), (0.5 + Math::Sin((at as f64) * 1.2) * 0.5) as f32),
+            .gold => shimmer(Color::rgb(255, 215, 90).mix(palette.dark_gold, along), at, clock),
+        };
+    }
+
+    static fn stripe(color: Color, at: i32) -> Color {
+        if at % 4 == 2 {
+            return color.mix(Color::rgb(70, 40, 20), 0.75);
+        }
+
+        return color;
+    }
+
+    static fn shimmer(color: Color, at: i32, clock: f64) -> Color {
+        let glint = Math::Sin((at as f64) * 0.5 - clock * 0.01);
+        if glint > 0.8 {
+            return color.mix(Color::rgb(255, 250, 225), ((glint - 0.8) * 3.0) as f32);
+        }
+
+        return color;
+    }
+}

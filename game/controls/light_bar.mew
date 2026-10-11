@@ -1,0 +1,107 @@
+#load "../engine/color.mew"
+#load "../scene/palette.mew"
+#load "../world/game.mew"
+#load "input.mew"
+
+use engine;
+
+pub type LightBar {
+    field input: Input;
+    field palette: Palette;
+    mut field glow: Color;
+    mut field flash: Color;
+    mut field flash_until: f64;
+    mut field shown: Color;
+    mut field shown_at: f64;
+
+    pub static fn new(input: Input, palette: Palette) -> LightBar {
+        return new LightBar {
+            input: input,
+            palette: palette,
+            glow: palette.head,
+            flash: palette.head,
+            flash_until: 0.0,
+            shown: palette.background,
+            shown_at: -1000.0,
+        };
+    }
+
+    pub fn follow(game: Game, clock: f64) {
+        let snake = game.snake;
+        let mut color = snake.skin().color(self.palette, 0, snake.length + 1, clock);
+        if game.frenzy_left() > 0.0 {
+            color = Color::hsv((clock * 0.002) as f32, 0.7, 1.0);
+        }
+
+        if game.is_over() && !game.has_won() {
+            color = self.palette.crash;
+        } else if game.is_paused() {
+            color = color.mix(Color::rgb(0, 0, 0), 0.75);
+        }
+
+        self.glow = color;
+    }
+
+    pub fn lighten(amount: f32) {
+        self.glow = self.glow.mix(Color::rgb(255, 255, 255), amount);
+    }
+
+    pub fn react(game: Game, clock: f64) {
+        for moment in game.moments {
+            match moment {
+                .ate(bite) => {
+                    if bite.fruit.is_golden() {
+                        self.flash_with(self.palette.gold, clock + 400.0);
+                    } else {
+                        self.flash_with(bite.fruit.color(self.palette), clock + 160.0);
+                    }
+                },
+                .frenzy_began => {
+                    self.flash_with(Color::rgb(255, 255, 255), clock + 150.0);
+                },
+                .vanished(_) | .appeared(_, _) | .escaped(_) | .season_turned(_) => { },
+                .caught(_, animal, _) => {
+                    self.flash_with(animal.color(), clock + 300.0);
+                },
+                .warped(_, _) => {
+                    self.flash_with(self.palette.portal_in, clock + 200.0);
+                },
+                .powered(_, power) => {
+                    self.flash_with(power.color(), clock + 300.0);
+                },
+                .faded(_) => {
+                    self.flash_with(self.palette.gold.mix(Color::rgb(0, 0, 0), 0.6), clock + 250.0);
+                },
+                .crashed(_) => {
+                    self.flash_with(self.palette.eye, clock + 120.0);
+                },
+            }
+        }
+    }
+
+    pub fn pop(clock: f64) {
+        self.flash_with(self.palette.accent, clock + 50.0);
+    }
+
+    // The colour only goes to the gamepad when it changes, and not too often,
+    // so the gamepad is not flooded.
+    pub fn show(clock: f64) {
+        let mut color = self.glow;
+        if clock < self.flash_until {
+            color = self.flash;
+        }
+
+        if color.same(self.shown) || clock - self.shown_at < 50.0 {
+            return;
+        }
+
+        self.input.light(color);
+        self.shown = color;
+        self.shown_at = clock;
+    }
+
+    fn flash_with(color: Color, until: f64) {
+        self.flash = color;
+        self.flash_until = until;
+    }
+}

@@ -1,0 +1,13 @@
+namespace engine;
+
+use system;
+
+pub type Chance {
+    pub static fn unit(random: Random) -> f32 {
+        return random.NextDouble() as f32;
+    }
+
+    pub static fn between(random: Random, least: f64, most: f64) -> f64 {
+        return least + random.NextDouble() * (most - least);
+    }
+}

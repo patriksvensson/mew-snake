@@ -1,0 +1,150 @@
+#load "../world/game.mew"
+#load "save_file.mew"
+
+use std.collections;
+use system;
+
+[struct]
+pub type Stat {
+    pub field name: string;
+    pub field value: string;
+}
+
+pub type Stats {
+    field file: SaveFile;
+    mut field games: i32;
+    mut field time: f64;
+    mut field fruit: i32;
+    mut field golden: i32;
+    mut field critters: i32;
+    mut field powers: i32;
+    mut field portals: i32;
+    mut field longest: i32;
+
+    pub static fn load() -> Stats {
+        let stats = new Stats { file: SaveFile::named(".mew-snake-stats", "stats"), games: 0, time: 0.0, fruit: 0, golden: 0, critters: 0, powers: 0, portals: 0, longest: 0 };
+        stats.file.each(|name, value| stats.read(name, value));
+        return stats;
+    }
+
+    pub fn list() -> Stat[] {
+        return new Stat[] {
+            new Stat { name: "GAMES PLAYED", value: $"{self.games}" },
+            new Stat { name: "TIME PLAYED", value: duration(self.time) },
+            new Stat { name: "FRUIT EATEN", value: $"{self.fruit}" },
+            new Stat { name: "GOLDEN APPLES", value: $"{self.golden}" },
+            new Stat { name: "CRITTERS CAUGHT", value: $"{self.critters}" },
+            new Stat { name: "POWER-UPS", value: $"{self.powers}" },
+            new Stat { name: "PORTAL TRIPS", value: $"{self.portals}" },
+            new Stat { name: "LONGEST SNAKE", value: $"{self.longest}" },
+        };
+    }
+
+    pub fn react(game: Game) {
+        for moment in game.moments {
+            match moment {
+                .ate(bite) => {
+                    self.fruit += 1;
+                    if bite.fruit.is_golden() {
+                        self.golden += 1;
+                    }
+                },
+                .caught(_, _, _) => {
+                    self.critters += 1;
+                },
+                .powered(_, _) => {
+                    self.powers += 1;
+                },
+                .warped(_, _) => {
+                    self.portals += 1;
+                },
+                _ => { },
+            }
+        }
+
+        self.longest = Math::Max(self.longest, game.snake.length);
+    }
+
+    pub fn finish(game: Game) {
+        self.games += 1;
+        self.time += game.time();
+        self.save();
+    }
+
+    static fn duration(milliseconds: f64) -> string {
+        let seconds = Math::Floor(milliseconds / 1000.0) as i32;
+        let minutes = seconds / 60;
+        if minutes >= 60 {
+            return $"{minutes / 60}H {two(minutes % 60)}M";
+        }
+
+        if minutes > 0 {
+            return $"{minutes}M {two(seconds % 60)}S";
+        }
+
+        return $"{seconds}S";
+    }
+
+    static fn two(number: i32) -> string {
+        if number < 10 {
+            return $"0{number}";
+        }
+
+        return $"{number}";
+    }
+
+    fn read(name: string, text: string) {
+        if let .ok(value) = text.parse_i32() {
+            self.count(name, value);
+        }
+    }
+
+    fn count(name: string, value: i32) {
+        if name == "games" {
+            self.games = value;
+        }
+
+        // The file keeps time in whole seconds.
+        if name == "seconds" {
+            self.time = value * 1000.0;
+        }
+
+        if name == "fruit" {
+            self.fruit = value;
+        }
+
+        if name == "golden" {
+            self.golden = value;
+        }
+
+        // Only mice were counted before there were other animals.
+        if name == "critters" || name == "mice" {
+            self.critters = value;
+        }
+
+        if name == "powers" {
+            self.powers = value;
+        }
+
+        if name == "portals" {
+            self.portals = value;
+        }
+
+        if name == "longest" {
+            self.longest = value;
+        }
+    }
+
+    fn save() {
+        let lines = List<string>::new();
+        lines.add($"games={self.games}");
+        lines.add($"seconds={Math::Floor(self.time / 1000.0) as i32}");
+        lines.add($"fruit={self.fruit}");
+        lines.add($"golden={self.golden}");
+        lines.add($"critters={self.critters}");
+        lines.add($"powers={self.powers}");
+        lines.add($"portals={self.portals}");
+        lines.add($"longest={self.longest}");
+        self.file.write(lines);
+    }
+}

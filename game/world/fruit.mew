@@ -1,0 +1,140 @@
+#load "../engine/color.mew"
+#load "../engine/geometry.mew"
+#load "../engine/sokol.mew"
+#load "../scene/palette.mew"
+
+use engine;
+use system;
+
+pub union Fruit {
+    apple,
+    orange,
+    grapes,
+    cherries,
+    golden,
+}
+
+impl Fruit {
+    pub static fn ordinary(random: Random) -> Fruit {
+        return match random.Next(0, 4) {
+            0 => .apple,
+            1 => .orange,
+            2 => .grapes,
+            _ => .cherries,
+        };
+    }
+
+    pub fn is_golden() -> bool {
+        return match self {
+            .golden => true,
+            _ => false,
+        };
+    }
+
+    pub fn points() -> i32 {
+        return match self {
+            .golden => 3,
+            _ => 1,
+        };
+    }
+
+    pub fn color(palette: Palette) -> Color {
+        return match self {
+            .apple => palette.food,
+            .orange => palette.orange,
+            .grapes => palette.grape,
+            .cherries => palette.cherry,
+            .golden => palette.gold,
+        };
+    }
+
+    pub fn draw(painter: Painter, palette: Palette, center: Point, cell: f32, clock: f64, shine: f32) {
+        let pulse = (1.0 + Math::Sin(clock * 0.008) * 0.08) as f32;
+        let size = cell * 0.34 * pulse;
+        let mut color = self.color(palette);
+        let golden = self.is_golden();
+
+        if golden && shine < 0.25 && Math::Floor(clock / 110.0) % 2.0 == 0.0 {
+            color = color.mix(palette.eye, 0.6);
+        }
+
+        painter.circle(center, cell * 0.75, color.fade(0.10));
+        painter.circle(center, cell * 0.55, color.fade(0.16));
+        painter.circle(center.offset(0.0, 2.0), size, palette.shadow.fade(0.5));
+        match self {
+            .apple | .golden => {
+                draw_apple(painter, palette, center, size, color);
+            },
+            .orange => {
+                draw_orange(painter, palette, center, size, color);
+            },
+            .grapes => {
+                draw_grapes(painter, palette, center, size, color);
+            },
+            .cherries => {
+                draw_cherries(painter, palette, center, size, color);
+            },
+        }
+
+        if golden {
+            painter.arc(center, cell * 0.66, 2.5, shine, palette.gold.fade(0.85));
+            for at in 0..3 {
+                let angle = clock * 0.0015 + (at as f64) * 2.094;
+                let twinkle = (0.55 + Math::Sin(clock * 0.009 + (at as f64) * 2.0) * 0.45) as f32;
+                let spot = center.offset((Math::Cos(angle) * size * 1.5) as f32, (Math::Sin(angle) * size * 1.5) as f32);
+                painter.sparkle(spot, size * 0.42 * twinkle, palette.eye.fade(0.9));
+            }
+        }
+    }
+
+    static fn draw_apple(painter: Painter, palette: Palette, center: Point, size: f32, color: Color) {
+        painter.circle(center, size, color);
+        painter.circle(center.offset(-size * 0.35, -size * 0.35), size * 0.3, palette.shine.fade(0.85));
+        painter.circle(center.offset(size * 0.35, -size * 1.05), size * 0.32, palette.leaf);
+    }
+
+    static fn draw_orange(painter: Painter, palette: Palette, center: Point, size: f32, color: Color) {
+        let dimple = color.mix(palette.shadow, 0.25);
+        painter.circle(center, size * 1.05, color);
+        painter.circle(center.offset(size * 0.4, size * 0.2), size * 0.08, dimple);
+        painter.circle(center.offset(-size * 0.1, size * 0.55), size * 0.08, dimple);
+        painter.circle(center.offset(size * 0.1, -size * 0.2), size * 0.08, dimple);
+        painter.circle(center.offset(-size * 0.4, -size * 0.4), size * 0.26, palette.shine.fade(0.7));
+        painter.circle(center.offset(0.0, -size * 1.0), size * 0.14, palette.stem);
+        painter.circle(center.offset(size * 0.3, -size * 1.1), size * 0.26, palette.leaf);
+    }
+
+    static fn draw_grapes(painter: Painter, palette: Palette, center: Point, size: f32, color: Color) {
+        let grape = size * 0.44;
+        let top = center.offset(0.0, -size * 0.25);
+        painter.band(top.offset(0.0, -size * 0.55), top.offset(size * 0.2, -size * 1.05), 1.4, palette.stem, palette.stem);
+        painter.circle(top.offset(size * 0.45, -size * 0.95), size * 0.24, palette.leaf);
+        for spot in new Point[] {
+            new Point { x: -size * 0.82, y: 0.0 },
+            new Point { x: 0.0, y: 0.0 },
+            new Point { x: size * 0.82, y: 0.0 },
+            new Point { x: -size * 0.41, y: size * 0.7 },
+            new Point { x: size * 0.41, y: size * 0.7 },
+            new Point { x: 0.0, y: size * 1.4 },
+        } {
+            let place = top.offset(spot.x, spot.y);
+            painter.circle(place, grape, color);
+            painter.circle(place.offset(-grape * 0.35, -grape * 0.35), grape * 0.3, palette.shine.fade(0.6));
+        }
+    }
+
+    static fn draw_cherries(painter: Painter, palette: Palette, center: Point, size: f32, color: Color) {
+        let cherry = size * 0.6;
+        let joint = center.offset(size * 0.15, -size * 1.15);
+        let left = center.offset(-size * 0.5, size * 0.35);
+        let right = center.offset(size * 0.55, size * 0.2);
+        painter.band(left.offset(0.0, -cherry * 0.8), joint, 1.2, palette.stem, palette.stem);
+        painter.band(right.offset(0.0, -cherry * 0.8), joint, 1.2, palette.stem, palette.stem);
+        painter.circle(joint.offset(size * 0.3, size * 0.05), size * 0.24, palette.leaf);
+        for place in new Point[] { left, right } {
+            painter.circle(place, cherry, color);
+            painter.circle(place.offset(-cherry * 0.35, -cherry * 0.35), cherry * 0.28, palette.shine.fade(0.75));
+        }
+    }
+
+}

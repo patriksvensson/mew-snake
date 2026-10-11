@@ -1,0 +1,98 @@
+#load "../engine/color.mew"
+#load "../engine/effects.mew"
+#load "../engine/geometry.mew"
+#load "../engine/random.mew"
+#load "scene.mew"
+
+use engine;
+use system;
+
+pub type Celebration {
+    field scene: Scene;
+    field sparks: Sparks;
+    field random: Random;
+    field colors: Color[];
+    field x: f32[];
+    field y: f32[];
+    field fall: f32[];
+    field sway: f32[];
+    field spin: f32[];
+    field shades: Color[];
+    mut field time: f64;
+    mut field next_firework: f64;
+
+    pub static fn new(scene: Scene) -> Celebration {
+        let palette = scene.palette;
+        let count = 70;
+        let party = new Celebration {
+            scene: scene,
+            sparks: Sparks::new(400),
+            random: new Random { },
+            colors: new Color[] { palette.food, palette.orange, palette.gold, palette.leaf, palette.grape, palette.accent, palette.cherry, palette.head },
+            x: new f32[count],
+            y: new f32[count],
+            fall: new f32[count],
+            sway: new f32[count],
+            spin: new f32[count],
+            shades: new Color[count],
+            time: 0.0,
+            next_firework: 300.0,
+        };
+
+        for at in 0..count {
+            party.drop(at);
+            party.y[at] = scene.viewport.top + Chance::unit(party.random) * scene.viewport.grid_height;
+        }
+
+        return party;
+    }
+
+    // Returns true when a firework goes off, so it can be heard.
+    pub fn update(milliseconds: f64) -> bool {
+        let seconds = (milliseconds / 1000.0) as f32;
+        let viewport = self.scene.viewport;
+        self.time += milliseconds;
+        self.sparks.update(milliseconds);
+        for at in 0..self.x.count {
+            self.y[at] += self.fall[at] * seconds;
+            if self.y[at] > viewport.bottom {
+                self.drop(at);
+            }
+        }
+
+        if self.time < self.next_firework {
+            return false;
+        }
+
+        self.next_firework = self.time + Chance::between(self.random, 700.0, 1300.0);
+        let at = new Point { x: viewport.margin + 60.0 + Chance::unit(self.random) * (viewport.grid_width - 120.0), y: viewport.top + 50.0 + Chance::unit(self.random) * viewport.grid_height * 0.4 };
+        let color = self.colors[self.random.Next(0, self.colors.count)];
+        self.sparks.burst(at, color, count: 50, speed: 230.0);
+        self.sparks.burst(at, self.scene.palette.eye, count: 14, speed: 120.0);
+        return true;
+    }
+
+    pub fn draw() {
+        let painter = self.scene.painter;
+        let viewport = self.scene.viewport;
+        self.sparks.draw(painter);
+        for at in 0..self.x.count {
+            let x = self.x[at] + (Math::Sin(self.time * 0.002 + self.spin[at]) * self.sway[at]) as f32;
+            let width = (1.0 + Math::Abs(Math::Cos(self.time * 0.006 + self.spin[at])) * 6.0) as f32;
+            if x > viewport.margin && x < viewport.margin + viewport.grid_width - width && self.y[at] > viewport.top {
+                painter.rect(x, self.y[at], width, 4.0, self.shades[at]);
+            }
+        }
+    }
+
+    fn drop(at: i32) {
+        let viewport = self.scene.viewport;
+        self.x[at] = viewport.margin + Chance::unit(self.random) * viewport.grid_width;
+        self.y[at] = viewport.top - Chance::unit(self.random) * 60.0;
+        self.fall[at] = 50.0 + Chance::unit(self.random) * 60.0;
+        self.sway[at] = 8.0 + Chance::unit(self.random) * 16.0;
+        self.spin[at] = Chance::unit(self.random) * 6.28f32;
+        self.shades[at] = self.colors[self.random.Next(0, self.colors.count)];
+    }
+
+}

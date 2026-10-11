@@ -1,4 +1,5 @@
-#load "game_state.mew"
+#load "board.mew"
+#load "game.mew"
 #load "pilot.mew"
 #load "snake.mew"
 
@@ -17,15 +18,15 @@ pub type Autopilot {
         };
     }
 
-    fn is_safe(state: GameState, direction: Direction) -> bool {
-        return !direction.reverses(state.heading) && !state.blocks(state.snake.head().next(direction));
+    fn is_safe(game: Game, direction: Direction) -> bool {
+        return !direction.reverses(game.heading()) && !game.blocks(game.snake.head().next(direction));
     }
 
-    fn rate(state: GameState, direction: Direction) -> Move {
-        let next = state.snake.head().next(direction);
-        let score = match self.measure_room(state.snake, next) {
-            room if room < state.snake.length => room - 10_000,
-            _ => -next.distance(state.food),
+    fn rate(game: Game, direction: Direction) -> Move {
+        let next = game.snake.head().next(direction);
+        let score = match self.measure_room(game.snake, next) {
+            room if room < game.snake.length => room - 10_000,
+            _ => -next.distance(game.food()),
         };
 
         return new Move { direction: direction, score: score };
@@ -62,11 +63,11 @@ pub type Autopilot {
 }
 
 impl Pilot for Autopilot {
-    pub fn steer(state: GameState) -> Direction {
-        let straight_on = new Move { direction: state.heading, score: -1_000_000 };
+    pub fn steer(game: Game) -> Direction {
+        let straight_on = new Move { direction: game.heading(), score: -1_000_000 };
         return self.directions
-            .filter(|direction| self.is_safe(state, direction))
-            .map(|direction| self.rate(state, direction))
+            .filter(|direction| self.is_safe(game, direction))
+            .map(|direction| self.rate(game, direction))
             .fold(straight_on, |best, candidate| best.higher(candidate))
             .direction;
     }

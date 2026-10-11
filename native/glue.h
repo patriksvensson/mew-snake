@@ -2,8 +2,9 @@
 #define GLUE_H
 
 void glue_setup(int samples);
-void glue_begin(int width, int height, float r, float g, float b);
-void glue_viewport(int x, int y, int width, int height);
+void glue_crt(int on);
+void glue_begin(int width, int height, int x, int y, int area_width, int area_height, float r, float g, float b);
+void glue_layer(int layer);
 void glue_text(int size);
 void glue_end(void);
 void glue_shutdown(void);

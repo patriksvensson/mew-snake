@@ -1,5 +1,6 @@
+#load "save_file.mew"
+
 use std.collections;
-use std.io;
 use system;
 
 pub type Entry {
@@ -8,7 +9,7 @@ pub type Entry {
 }
 
 pub type HighScores {
-    field path: string;
+    field file: SaveFile;
     pub field limit: i32;
     mut field entries: List<Entry>;
 
@@ -16,13 +17,10 @@ pub type HighScores {
         get { return self.entries.count(); }
     }
 
-    pub static fn load() -> HighScores {
-        let path = $"{Environment::GetEnvironmentVariable("HOME")}/.mew-snake";
-        let scores = new HighScores { path: path, limit: 10, entries: List<Entry>::new() };
-        if let .ok(entries) = read(path) {
-            for entry in entries {
-                scores.rank(entry);
-            }
+    pub static fn load(name: string) -> HighScores {
+        let scores = new HighScores { file: SaveFile::named(name, "high scores"), limit: 10, entries: List<Entry>::new() };
+        for entry in read(scores.file) {
+            scores.rank(entry);
         }
 
         return scores;
@@ -62,9 +60,7 @@ pub type HighScores {
             lines.add($"{entry.initials} {entry.score}");
         }
 
-        if let .err(problem) = write_text(file(self.path), string::join("\n", lines)) {
-            eprintln($"The high scores could not be saved: {problem}");
-        }
+        self.file.write(lines);
 
         return place;
     }
@@ -90,13 +86,9 @@ pub type HighScores {
         return place;
     }
 
-    static fn read(path: string) -> Result<List<Entry>, string> {
+    static fn read(saved: SaveFile) -> List<Entry> {
         let entries = List<Entry>::new();
-        if !exists(path) {
-            return .ok(entries);
-        }
-
-        for line in read_text(file(path))?.lines() {
+        for line in saved.lines() {
             let parts = line.trim_end().split(' ');
             if parts.count == 2 {
                 if let .ok(score) = parts[1].parse_i32() {
@@ -114,6 +106,6 @@ pub type HighScores {
             }
         }
 
-        return .ok(entries);
+        return entries;
     }
 }

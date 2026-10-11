@@ -1,0 +1,47 @@
+#load "../engine/color.mew"
+
+use engine;
+
+pub union Season {
+    spring,
+    summer,
+    autumn,
+    winter,
+}
+
+impl Season {
+    pub static fn of(score: i32) -> Season {
+        return all()[(score / 10) % 4];
+    }
+
+    pub static fn all() -> Season[] {
+        return new Season[] { .spring, .summer, .autumn, .winter };
+    }
+
+    pub fn index() -> i32 {
+        return match self {
+            .spring => 0,
+            .summer => 1,
+            .autumn => 2,
+            .winter => 3,
+        };
+    }
+
+    pub fn name() -> string {
+        return match self {
+            .spring => "SPRING",
+            .summer => "SUMMER",
+            .autumn => "AUTUMN",
+            .winter => "WINTER",
+        };
+    }
+
+    pub fn tint() -> Color {
+        return match self {
+            .spring => Color::rgb(255, 170, 210),
+            .summer => Color::rgb(255, 220, 120),
+            .autumn => Color::rgb(240, 130, 50),
+            .winter => Color::rgb(170, 200, 255),
+        };
+    }
+}

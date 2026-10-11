@@ -1,0 +1,158 @@
+#load "../engine/color.mew"
+#load "../engine/geometry.mew"
+#load "../engine/sokol.mew"
+#load "../world/game.mew"
+#load "palette.mew"
+#load "viewport.mew"
+
+use engine;
+use system;
+
+pub type Speech {
+    field random: Random;
+    field yums: string[];
+    mut field said: string;
+    mut field said_at: f64;
+    mut field at: Point;
+    mut field placed_at: f64;
+    mut field drawn_at: f64;
+
+    pub static fn new() -> Speech {
+        return new Speech {
+            random: new Random { },
+            yums: new string[] { "YUM!", "NOM!", "TASTY!", "MMM!" },
+            said: "",
+            said_at: 0.0,
+            at: new Point { x: 0.0, y: 0.0 },
+            placed_at: -1.0,
+            drawn_at: 0.0,
+        };
+    }
+
+    // Plain bites only get a word now and then, so the snake does not go on
+    // about every one.
+    pub fn hear(game: Game, clock: f64) {
+        for moment in game.moments {
+            let line = match moment {
+                .ate(bite) => self.bite(bite),
+                .warped(_, _) => "WHEE!",
+                .caught(_, _, _) => "GOTCHA!",
+                .powered(_, power) => match power {
+                    .slow => "SLOW...",
+                    .ghost => "BOO!",
+                    .magnet => "COME HERE!",
+                    .shrink => "SNIP!",
+                },
+                .frenzy_began => "WOW!",
+                .crashed(_) => "OH NO!",
+                .faded(_) | .vanished(_) | .appeared(_, _) | .escaped(_) | .season_turned(_) => "",
+            };
+            if !line.is_empty() {
+                self.said = line;
+                self.said_at = clock;
+            }
+        }
+    }
+
+    fn bite(bite: Bite) -> string {
+        if bite.fruit.is_golden() {
+            return "SHINY!";
+        }
+
+        if bite.combo >= 4 {
+            return "WOW!";
+        }
+
+        if self.random.NextDouble() < 0.5 {
+            return self.yums[self.random.Next(0, self.yums.count)];
+        }
+
+        return "";
+    }
+
+    // A new line starts out right where it belongs, and from then on the bubble
+    // glides after the head, so it slides across rather than jumping when it
+    // has to move to the other side.
+    pub fn draw(painter: Painter, palette: Palette, viewport: Viewport, head: Point, clock: f64) {
+        let age = clock - self.said_at;
+        if self.said.is_empty() || age > life() {
+            return;
+        }
+
+        let width = painter.measure(.small, self.said) + 16.0;
+        let target = place(viewport, head, width);
+        if self.placed_at != self.said_at {
+            self.at = target;
+            self.placed_at = self.said_at;
+        } else {
+            let follow = (1.0 - Math::Exp(-(clock - self.drawn_at) / 45.0)) as f32;
+            self.at = self.at.lerp(target, follow);
+        }
+
+        self.drawn_at = clock;
+        let fade = Math::Min(Math::Min(1.0, age / 100.0), (life() - age) / 200.0) as f32;
+        draw_bubble(painter, palette, self.at, width, head, self.said, fade);
+    }
+
+    pub static fn draw_snooze(painter: Painter, palette: Palette, at: Point, clock: f64) {
+        let sizes = new TextSize[] { .small, .medium, .medium };
+        for z in 0..3 {
+            let age = ((clock / 1800.0 + z / 3.0f32) % 1.0) as f32;
+            let size = sizes[z];
+            let fade = Math::Min(1.0f32, Math::Min(age * 4.0f32, (1.0f32 - age) * 3.0f32));
+            let spot = at.offset(age * 40.0f32 + z * 6.0f32, -age * 34.0f32);
+            painter.write(size, spot.x, spot.y, "Z", palette.dim.mix(palette.eye, 0.4).fade(fade));
+        }
+    }
+
+    static fn life() -> f64 {
+        return 1100.0;
+    }
+
+    // The bubble goes off to one side above the head, out of the way of the
+    // points rising from a bite, or below it near the top of the board, and
+    // never past the edges.
+    static fn place(viewport: Viewport, head: Point, width: f32) -> Point {
+        let left = viewport.margin + 2.0;
+        let right = viewport.margin + viewport.grid_width - width - 2.0;
+        let mut x = head.x + 22.0;
+        if x > right {
+            x = head.x - 22.0 - width;
+        }
+
+        let mut y = head.y - 20.0 - height();
+        if y < viewport.top + 2.0 {
+            y = head.y + 20.0;
+        }
+
+        return new Point { x: Math::Clamp(x, left, right), y: y };
+    }
+
+    static fn height() -> f32 {
+        return 26.0;
+    }
+
+    static fn draw_bubble(painter: Painter, palette: Palette, at: Point, width: f32, head: Point, text: string, fade: f32) {
+        let radius: f32 = 7.0;
+        let height = height();
+        let x = at.x;
+        let y = at.y;
+        let mut edge = y;
+        if head.y > y + height / 2 {
+            edge = y + height;
+        }
+
+        let point = Math::Clamp(head.x, x + 12.0, x + width - 12.0);
+        let color = palette.eye.fade(fade);
+        let toward = head.y + (edge - head.y) * 0.4f32;
+        painter.rect(x + 2.0, y + 3.0, width, height, palette.shadow.fade(fade * 0.5f32));
+        painter.triangle(new Point { x: point - 6.0, y: edge }, new Point { x: point + 6.0, y: edge }, new Point { x: head.x, y: toward }, color);
+        painter.rect(x + radius, y, width - radius * 2, height, color);
+        painter.rect(x, y + radius, width, height - radius * 2, color);
+        for corner in new Point[] { new Point { x: x + radius, y: y + radius }, new Point { x: x + width - radius, y: y + radius }, new Point { x: x + radius, y: y + height - radius }, new Point { x: x + width - radius, y: y + height - radius } } {
+            painter.circle(corner, radius, color);
+        }
+
+        painter.write(.small, x + 8.0, y + 5.0, text, palette.pupil.fade(fade));
+    }
+}

@@ -1,4 +1,4 @@
-#load "snake.mew"
+#load "../world/board.mew"
 
 use system;
 

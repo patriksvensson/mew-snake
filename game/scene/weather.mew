@@ -1,0 +1,164 @@
+#load "../engine/color.mew"
+#load "../engine/geometry.mew"
+#load "../engine/random.mew"
+#load "../engine/sokol.mew"
+#load "../world/season.mew"
+#load "viewport.mew"
+
+use engine;
+use system;
+
+pub type Weather {
+    field viewport: Viewport;
+    field random: Random;
+    field x: f32[];
+    field y: f32[];
+    field fall: f32[];
+    field sway: f32[];
+    field phase: f32[];
+    field kinds: Season[];
+    field shades: Color[];
+    mut field season: Season;
+    mut field before: Season;
+    mut field blend: f32;
+    mut field clock: f64;
+
+    pub static fn new(viewport: Viewport, count: i32) -> Weather {
+        let weather = new Weather {
+            viewport: viewport,
+            random: new Random { },
+            x: new f32[count],
+            y: new f32[count],
+            fall: new f32[count],
+            sway: new f32[count],
+            phase: new f32[count],
+            kinds: new Season[count],
+            shades: new Color[count],
+            season: .spring,
+            before: .spring,
+            blend: 1.0,
+            clock: 0.0,
+        };
+
+        for at in 0..count {
+            weather.spawn(at);
+            weather.y[at] = viewport.top + Chance::unit(weather.random) * viewport.grid_height;
+        }
+
+        return weather;
+    }
+
+    pub fn season() -> Season {
+        return self.season;
+    }
+
+    // Returns true when the season has just changed.
+    pub fn follow(season: Season) -> bool {
+        if season.index() == self.season.index() {
+            return false;
+        }
+
+        self.before = self.season;
+        self.season = season;
+        self.blend = 0.0;
+        return true;
+    }
+
+    pub fn tint(color: Color) -> Color {
+        let tint = self.before.tint().mix(self.season.tint(), self.blend);
+        return color.mix(tint, 0.07);
+    }
+
+    pub fn update(milliseconds: f64) {
+        let seconds = (milliseconds / 1000.0) as f32;
+        self.clock += milliseconds;
+        self.blend = Math::Min(1.0, self.blend + seconds / 2.0);
+        let viewport = self.viewport;
+        for at in 0..self.x.count {
+            match self.kinds[at] {
+                .summer => {
+                    self.x[at] += (Math::Cos(self.clock * 0.0007 + self.phase[at]) * 14.0) as f32 * seconds;
+                    self.y[at] += (Math::Sin(self.clock * 0.0009 + self.phase[at] * 1.3) * 10.0) as f32 * seconds;
+                    // Fireflies never fall off the board, so once summer is
+                    // over they slip away one by one.
+                    if self.kinds[at].index() != self.season.index() && Chance::unit(self.random) < seconds * 0.5 {
+                        self.spawn(at);
+                    }
+                },
+                _ => {
+                    self.y[at] += self.fall[at] * seconds;
+                },
+            }
+
+            if self.y[at] > viewport.bottom + 10.0 || self.x[at] < viewport.margin - 20.0 || self.x[at] > viewport.margin + viewport.grid_width + 20.0 {
+                self.spawn(at);
+            }
+        }
+    }
+
+    pub fn draw(painter: Painter) {
+        let viewport = self.viewport;
+        for at in 0..self.x.count {
+            let x = self.x[at] + (Math::Sin(self.clock * 0.0015 + self.phase[at]) * self.sway[at]) as f32;
+            let y = self.y[at];
+            if x < viewport.margin + 2.0 || x > viewport.margin + viewport.grid_width - 2.0 || y < viewport.top + 2.0 || y > viewport.bottom - 2.0 {
+                continue;
+            }
+
+            let spot = new Point { x: x, y: y };
+            let shade = self.shades[at];
+            match self.kinds[at] {
+                .spring => {
+                    painter.circle(spot, 2.6, shade.fade(0.7));
+                    painter.circle(spot.offset(2.2, 1.0), 2.0, shade.fade(0.7));
+                },
+                .summer => {
+                    let glow = (0.5 + Math::Sin(self.clock * 0.004 + self.phase[at] * 3.0) * 0.5) as f32;
+                    painter.circle(spot, 6.0, shade.fade(0.15 * glow));
+                    painter.circle(spot, 2.0, shade.fade(0.3 + 0.6 * glow));
+                },
+                .autumn => {
+                    let turn = (Math::Sin(self.clock * 0.003 + self.phase[at]) * 3.5) as f32;
+                    painter.triangle(spot.offset(-turn, -3.5), spot.offset(3.5, 0.0), spot.offset(turn, 3.5), shade.fade(0.75));
+                    painter.triangle(spot.offset(-turn, -3.5), spot.offset(turn, 3.5), spot.offset(-3.5, 0.0), shade.fade(0.75));
+                },
+                .winter => {
+                    painter.circle(spot, 1.6 + self.sway[at] * 0.12, shade.fade(0.85));
+                },
+            }
+        }
+    }
+
+    fn spawn(at: i32) {
+        let viewport = self.viewport;
+        self.kinds[at] = self.season;
+        self.x[at] = viewport.margin + Chance::unit(self.random) * viewport.grid_width;
+        self.y[at] = viewport.top - 6.0;
+        self.phase[at] = Chance::unit(self.random) * 6.28f32;
+        match self.season {
+            .spring => {
+                self.fall[at] = 18.0 + Chance::unit(self.random) * 14.0;
+                self.sway[at] = 10.0 + Chance::unit(self.random) * 8.0;
+                self.shades[at] = Color::rgb(255, 190, 215).mix(Color::rgb(255, 240, 245), Chance::unit(self.random));
+            },
+            .summer => {
+                self.fall[at] = 0.0;
+                self.sway[at] = 4.0;
+                self.y[at] = viewport.top + Chance::unit(self.random) * viewport.grid_height;
+                self.shades[at] = Color::rgb(255, 235, 120);
+            },
+            .autumn => {
+                self.fall[at] = 30.0 + Chance::unit(self.random) * 22.0;
+                self.sway[at] = 16.0 + Chance::unit(self.random) * 10.0;
+                let leaves = new Color[] { Color::rgb(240, 140, 40), Color::rgb(220, 80, 40), Color::rgb(180, 110, 40) };
+                self.shades[at] = leaves[self.random.Next(0, 3)];
+            },
+            .winter => {
+                self.fall[at] = 22.0 + Chance::unit(self.random) * 22.0;
+                self.sway[at] = 4.0 + Chance::unit(self.random) * 8.0;
+                self.shades[at] = Color::rgb(235, 242, 255);
+            },
+        }
+    }
+
+}

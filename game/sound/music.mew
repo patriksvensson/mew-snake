@@ -1,0 +1,237 @@
+#load "../engine/audio.mew"
+
+use engine;
+use system;
+
+// One tune to loop, with a chord of four notes for each bar. The lead picks
+// among them a sixteenth at a time, and its two bars take turns.
+type Tune {
+    pub field roots: i32[];
+    pub field chords: i32[];
+    pub field bass: i32[];
+    pub field leads: i32[];
+    // Each drum hit adds up from a kick for one, a snare for two and a hi-hat
+    // for four.
+    pub field drums: i32[];
+    pub field lead: Wave;
+    pub field loudness: f64;
+    // How many sixteenths a note of the lead lasts.
+    pub field hold: f64;
+
+    // The tunes for spring, summer, autumn and winter, in that order.
+    pub static fn seasons() -> Tune[] {
+        let rest = -1;
+        return new Tune[] {
+            new Tune {
+                roots: new i32[] { 45, 41, 48, 43 },
+                chords: new i32[] { 69, 72, 76, 81, 69, 72, 77, 81, 67, 72, 76, 79, 67, 71, 74, 79 },
+                bass: new i32[] { 0, rest, 12, rest, 0, rest, 12, rest, 0, rest, 12, rest, 0, rest, 7, rest },
+                leads: new i32[] {
+                    2, rest, 1, 0, 1, rest, 2, 3, 2, rest, 1, rest, 0, 1, 2, rest,
+                    3, rest, 3, 2, 1, rest, 2, rest, 3, 2, 1, rest, 2, rest, 3, rest,
+                },
+                drums: new i32[] { 1, 0, 4, 0, 2, 0, 4, 0, 1, 0, 4, 0, 2, 0, 4, 0 },
+                lead: .square,
+                loudness: 0.035,
+                hold: 0.9,
+            },
+            new Tune {
+                roots: new i32[] { 50, 47, 43, 45 },
+                chords: new i32[] { 74, 78, 81, 86, 71, 74, 78, 83, 71, 74, 79, 83, 73, 76, 81, 85 },
+                bass: new i32[] { 0, rest, rest, 0, rest, rest, 7, rest, 0, rest, rest, 0, rest, 12, 7, rest },
+                leads: new i32[] {
+                    0, rest, 1, rest, 2, 1, rest, 3, rest, 2, rest, 1, 2, rest, 3, rest,
+                    3, rest, 2, 3, rest, 2, 1, rest, 0, rest, 1, rest, 2, rest, rest, rest,
+                },
+                drums: new i32[] { 5, 0, 4, 0, 6, 0, 5, 0, 5, 0, 4, 0, 6, 0, 4, 0 },
+                lead: .square,
+                loudness: 0.042,
+                hold: 0.6,
+            },
+            new Tune {
+                roots: new i32[] { 50, 46, 43, 45 },
+                chords: new i32[] { 69, 74, 77, 81, 70, 74, 77, 82, 67, 70, 74, 79, 69, 73, 76, 81 },
+                bass: new i32[] { 0, rest, rest, rest, rest, rest, 7, rest, 0, rest, rest, rest, 12, rest, 7, rest },
+                leads: new i32[] {
+                    3, rest, rest, 2, rest, rest, 1, rest, 2, rest, rest, 1, rest, rest, 0, rest,
+                    1, rest, rest, 2, rest, rest, 3, rest, 2, rest, 1, rest, 0, rest, rest, rest,
+                },
+                drums: new i32[] { 1, 0, 0, 0, 2, 0, 4, 0, 1, 0, 1, 0, 2, 0, 0, 4 },
+                lead: .triangle,
+                loudness: 0.06,
+                hold: 1.8,
+            },
+            new Tune {
+                roots: new i32[] { 52, 48, 43, 50 },
+                chords: new i32[] { 79, 83, 88, 91, 76, 79, 84, 88, 79, 83, 86, 91, 78, 81, 86, 90 },
+                bass: new i32[] { 0, rest, 7, rest, 12, rest, 7, rest, 0, rest, 7, rest, 12, rest, 7, rest },
+                leads: new i32[] {
+                    0, 1, 2, 3, 2, 1, rest, rest, 0, 1, 2, 3, 2, rest, 1, rest,
+                    3, rest, 2, rest, 1, rest, 0, rest, 1, 2, 3, rest, 2, rest, rest, rest,
+                },
+                drums: new i32[] { 5, 4, 4, 4, 6, 4, 4, 4, 5, 4, 4, 4, 6, 4, 4, 4 },
+                lead: .triangle,
+                loudness: 0.05,
+                hold: 1.0,
+            },
+        };
+    }
+}
+
+pub type Music {
+    field speaker: Speaker;
+    field voice: i32;
+    field tunes: Tune[];
+    field future: f32[];
+    field chunk: f32[];
+    field random: Random;
+    field kick: Sound;
+    field snare: Sound;
+    field hat: Sound;
+    mut field tune: i32;
+    mut field wanted: i32;
+    mut field head: i32;
+    mut field step: i32;
+    mut field pace: f64;
+    mut field gain: f32;
+    mut field applied: f32;
+    mut field loudness: f32;
+    mut field playing: bool;
+
+    pub static fn new(speaker: Speaker, voice: i32) -> Music {
+        return new Music {
+            speaker: speaker,
+            voice: voice,
+            tunes: Tune::seasons(),
+            future: new f32[Sound::rate()],
+            chunk: new f32[Sound::rate()],
+            random: new Random { },
+            kick: Sound::tone(.sine, 150.0, 45.0, 90.0, 0.3),
+            snare: Sound::tone(.noise, 2000.0, 900.0, 80.0, 0.07),
+            hat: Sound::tone(.noise, 7000.0, 7000.0, 25.0, 0.025),
+            tune: 0,
+            wanted: 0,
+            head: 0,
+            step: 0,
+            pace: 140.0,
+            gain: 0.0,
+            applied: -1.0,
+            loudness: 1.0,
+            playing: false,
+        };
+    }
+
+    pub fn set_loudness(loudness: f32) {
+        self.loudness = loudness;
+    }
+
+    pub fn play() {
+        self.playing = true;
+    }
+
+    pub fn stop() {
+        self.playing = false;
+    }
+
+    // One sixteenth note for every step the snake takes, though never so fast
+    // it turns into a blur.
+    pub fn follow(step_time: f64) {
+        self.pace = Math::Max(85.0, step_time);
+    }
+
+    // A tune always plays all the way through before the next one comes in, and
+    // they come in the order of the seasons, one at a time, however quickly the
+    // seasons go by.
+    pub fn choose(tune: i32) {
+        self.wanted = tune % self.tunes.count;
+    }
+
+    pub fn begin(tune: i32) {
+        self.tune = tune % self.tunes.count;
+        self.wanted = self.tune;
+        self.step = 0;
+        self.playing = true;
+    }
+
+    pub fn update(milliseconds: f64) {
+        let mut target: f32 = 0.0;
+        if self.playing {
+            target = 1.0;
+        }
+
+        let change = (milliseconds / 300.0) as f32;
+        self.gain = Math::Clamp(target, self.gain - change, self.gain + change);
+        if self.gain * self.loudness != self.applied {
+            self.applied = self.gain * self.loudness;
+            self.speaker.volume(self.voice, self.applied);
+        }
+
+        if self.gain <= 0.0 || !self.speaker.is_open() {
+            return;
+        }
+
+        // A little of the tune is always queued up ahead, so it never stutters
+        // between frames.
+        let mut steps = 0;
+        while self.speaker.queued(self.voice) < 250.0 && steps < 8 {
+            self.render();
+            steps += 1;
+        }
+    }
+
+    fn render() {
+        if self.step == 0 && self.wanted != self.tune {
+            self.tune = (self.tune + 1) % self.tunes.count;
+        }
+
+        let tune = self.tunes[self.tune];
+        let bar = (self.step / 16) % tune.roots.count;
+        let beat = self.step % 16;
+        let root = tune.roots[bar];
+        let tone = tune.leads[(self.step / 64) % 2 * 16 + beat];
+
+        // Bass and lead notes last as long as the pace says, so each one is
+        // made as it comes up. The drums never change, so they were made once
+        // at the start.
+        if tune.bass[beat] >= 0 {
+            let note = Sound::pitch(root + tune.bass[beat]);
+            Sound::mix(self.future, self.head, .triangle, note, note, self.pace * 1.8, 0.12, self.random);
+        }
+
+        if tone >= 0 {
+            let note = Sound::pitch(tune.chords[bar * 4 + tone]);
+            Sound::mix(self.future, self.head, tune.lead, note, note, self.pace * tune.hold, tune.loudness, self.random);
+        }
+
+        let drums = tune.drums[beat];
+        if drums % 2 == 1 {
+            self.sound(self.kick);
+        }
+
+        if drums / 2 % 2 == 1 {
+            self.sound(self.snare);
+        }
+
+        if drums / 4 % 2 == 1 {
+            self.sound(self.hat);
+        }
+
+        let length = Math::Min(self.chunk.count, (self.pace * Sound::rate() / 1000.0) as i32);
+        for at in 0..length {
+            let place = (self.head + at) % self.future.count;
+            self.chunk[at] = self.future[place];
+            self.future[place] = 0.0;
+        }
+
+        self.head = (self.head + length) % self.future.count;
+        self.step = (self.step + 1) % (16 * tune.roots.count * 2);
+        self.speaker.queue_samples(self.chunk, length, self.voice);
+    }
+
+    fn sound(sound: Sound) {
+        for at in 0..sound.samples.count {
+            let place = (self.head + at) % self.future.count;
+            self.future[place] += sound.samples[at];
+        }
+    }
+}

@@ -1,0 +1,131 @@
+#load "../engine/color.mew"
+#load "../engine/geometry.mew"
+#load "../engine/sokol.mew"
+#load "../scene/palette.mew"
+
+use engine;
+use system;
+
+pub union Power {
+    slow,
+    ghost,
+    magnet,
+    shrink,
+}
+
+impl Power {
+    pub static fn any(random: Random) -> Power {
+        return match random.Next(0, 4) {
+            0 => .slow,
+            1 => .ghost,
+            2 => .magnet,
+            _ => .shrink,
+        };
+    }
+
+    pub static fn all() -> Power[] {
+        return new Power[] { .slow, .ghost, .magnet, .shrink };
+    }
+
+    pub fn index() -> i32 {
+        return match self {
+            .slow => 0,
+            .ghost => 1,
+            .magnet => 2,
+            .shrink => 3,
+        };
+    }
+
+    pub fn name() -> string {
+        return match self {
+            .slow => "SLOW",
+            .ghost => "GHOST",
+            .magnet => "MAGNET",
+            .shrink => "SHRINK",
+        };
+    }
+
+    pub fn lasts() -> f64 {
+        return match self {
+            .slow => 6000.0,
+            .ghost => 15000.0,
+            .magnet => 8000.0,
+            .shrink => 0.0,
+        };
+    }
+
+    pub fn color() -> Color {
+        return match self {
+            .slow => Color::rgb(110, 175, 255),
+            .ghost => Color::rgb(215, 205, 255),
+            .magnet => Color::rgb(255, 95, 95),
+            .shrink => Color::rgb(90, 225, 200),
+        };
+    }
+
+    pub fn draw(painter: Painter, palette: Palette, center: Point, cell: f32, clock: f64, left: f64) {
+        if left < 2000.0 && Math::Floor(clock / 120.0) % 2.0 == 0.0 {
+            return;
+        }
+
+        let bob = (Math::Sin(clock * 0.005) * cell * 0.06) as f32;
+        let middle = center.offset(0.0, bob);
+        let size = cell * 0.34;
+        let color = self.color();
+        painter.circle(middle, size * 1.35, color.fade(0.22));
+        painter.arc(middle, size * 1.35, 2.0, 1.0, color.fade(0.8));
+        match self {
+            .slow => {
+                draw_clock(painter, palette, middle, size, color);
+            },
+            .ghost => {
+                draw_ghost(painter, palette, middle, size, color);
+            },
+            .magnet => {
+                draw_magnet(painter, palette, middle, size, color);
+            },
+            .shrink => {
+                draw_shrink(painter, middle, size, color);
+            },
+        }
+    }
+
+    static fn draw_clock(painter: Painter, palette: Palette, center: Point, size: f32, color: Color) {
+        painter.circle(center, size * 0.85, palette.eye);
+        painter.arc(center, size * 0.85, 2.5, 1.0, color);
+        painter.band(center, center.offset(0.0, -size * 0.6), 1.3, palette.pupil, palette.pupil);
+        painter.band(center, center.offset(size * 0.45, 0.0), 1.3, palette.pupil, palette.pupil);
+    }
+
+    static fn draw_ghost(painter: Painter, palette: Palette, center: Point, size: f32, color: Color) {
+        let top = center.offset(0.0, -size * 0.15);
+        painter.circle(top, size * 0.7, color);
+        painter.rect(center.x - size * 0.7, top.y, size * 1.4, size * 0.65, color);
+        for at in 0..3 {
+            let left = center.x - size * 0.7 + at * size * 0.4667f32;
+            let edge = top.y + size * 0.65;
+            painter.triangle(new Point { x: left, y: edge }, new Point { x: left + size * 0.4667f32, y: edge }, new Point { x: left + size * 0.2333f32, y: edge + size * 0.3f32 }, color);
+        }
+
+        painter.circle(top.offset(-size * 0.25, 0.0), size * 0.14, palette.pupil);
+        painter.circle(top.offset(size * 0.25, 0.0), size * 0.14, palette.pupil);
+    }
+
+    static fn draw_magnet(painter: Painter, palette: Palette, center: Point, size: f32, color: Color) {
+        let bend = center.offset(0.0, size * 0.1);
+        painter.arc(bend, size * 0.5, size * 0.38, 0.5, color, from: 0.25);
+        for way in new f32[] { -1.0, 1.0 } {
+            let x = center.x + size * 0.5 * way;
+            painter.rect(x - size * 0.19, bend.y - size * 0.55, size * 0.38, size * 0.55, color);
+            painter.rect(x - size * 0.19, bend.y - size * 0.8, size * 0.38, size * 0.25, palette.eye);
+        }
+    }
+
+    static fn draw_shrink(painter: Painter, center: Point, size: f32, color: Color) {
+        for way in new f32[] { -1.0, 1.0 } {
+            let tip = center.offset(size * 0.18 * way, 0.0);
+            let back = center.offset(size * 0.85 * way, 0.0);
+            painter.triangle(tip, back.offset(0.0, -size * 0.45), back.offset(0.0, size * 0.45), color);
+        }
+    }
+}

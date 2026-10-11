@@ -1,77 +1,249 @@
 #load "../engine/screens.mew"
-#load "../game.mew"
 #load "../stage.mew"
+#load "../world/game.mew"
 #load "play.mew"
+#load "setting_menu.mew"
 
 use engine;
 use system;
 
-pub type TitleScreen {
-    field stage: Stage;
-    mut field demo: Game;
-    mut field clock: f64;
+union Mode {
+    play,
+    scores,
+    stats,
+    settings,
+    exit,
+}
 
-    pub static fn new(stage: Stage) -> TitleScreen {
-        return new TitleScreen { stage: stage, demo: stage.demo(), clock: 0.0 };
+impl Mode {
+    pub static fn all() -> Mode[] {
+        return new Mode[] { .play, .scores, .stats, .settings, .exit };
     }
 
-    fn is_showing_scores() -> bool {
-        // The title takes turns with the high scores while it waits for a player.
-        return Math::Floor(self.clock / 7000.0) % 2.0 == 1.0;
+    pub fn index() -> i32 {
+        return match self {
+            .play => 0,
+            .scores => 1,
+            .stats => 2,
+            .settings => 3,
+            .exit => 4,
+        };
+    }
+
+    pub fn label() -> string {
+        return match self {
+            .play => "PLAY",
+            .scores => "HIGH SCORES",
+            .stats => "STATS",
+            .settings => "SETTINGS",
+            .exit => "EXIT",
+        };
+    }
+}
+
+union Page {
+    title,
+    scores,
+    stats,
+    settings,
+}
+
+impl Page {
+    pub fn is_title() -> bool {
+        return match self {
+            .title => true,
+            .scores | .stats | .settings => false,
+        };
+    }
+}
+
+pub type TitleScreen {
+    field stage: Stage;
+    field menu: SettingMenu;
+    field settings: Setting[];
+    mut field demo: Game;
+    mut field page: Page;
+    mut field mode: Mode;
+    mut field setting: i32;
+
+    pub static fn new(stage: Stage) -> TitleScreen {
+        return new TitleScreen {
+            stage: stage,
+            menu: SettingMenu::new(stage),
+            settings: Setting::all(),
+            demo: stage.demo(),
+            page: .title,
+            mode: .play,
+            setting: 0,
+        };
+    }
+
+    fn choose() -> Transition<Command> {
+        return match self.page {
+            .settings => self.change(0),
+            .title => match self.mode {
+                .play => PlayScreen::start(self.stage),
+                .scores => self.open(.scores),
+                .stats => self.open(.stats),
+                .settings => self.open(.settings),
+                .exit => .quit,
+            },
+            .scores | .stats => self.show_title(),
+        };
+    }
+
+    fn open(page: Page) -> Transition<Command> {
+        self.page = page;
+        self.stage.sounds.play(.choose);
+        return .stay;
+    }
+
+    fn change(step: i32) -> Transition<Command> {
+        if step == 0 {
+            self.menu.pick(self.settings[self.setting], self.demo.snake);
+        } else {
+            self.menu.change(self.settings[self.setting], step, self.demo.snake);
+        }
+
+        return .stay;
+    }
+
+    fn toggle_easy() -> Transition<Command> {
+        self.menu.change(.easy, 1, self.demo.snake);
+        return .stay;
+    }
+
+    fn steer_sideways(step: i32) -> Transition<Command> {
+        return match self.page {
+            .settings => self.change(step),
+            .title | .scores | .stats => .stay,
+        };
+    }
+
+    fn scroll(step: i32) -> Transition<Command> {
+        match self.page {
+            .title => {
+                let modes = Mode::all();
+                self.mode = modes[(self.mode.index() + step + modes.count) % modes.count];
+            },
+            .settings => {
+                self.setting = (self.setting + step + self.settings.count) % self.settings.count;
+            },
+            .scores | .stats => {
+                return .stay;
+            },
+        }
+
+        self.stage.sounds.play(.tick);
+        return .stay;
+    }
+
+    fn show_title() -> Transition<Command> {
+        if !self.page.is_title() {
+            self.page = .title;
+            self.stage.sounds.play(.tick);
+        }
+
+        return .stay;
     }
 
     fn draw_title() {
         let scene = self.stage.scene;
         let top = scene.viewport.top;
-        scene.shadowed_centered(.large, scene.center, top + 52.0, "MEW", scene.palette.head);
-        scene.shadowed_centered(.large, scene.center, top + 112.0, "SNAKE", scene.palette.text);
-        scene.shadowed_centered(.medium, scene.center, scene.middle - 4.0, self.stage.press, scene.palette.accent.fade(scene.blink));
-        match self.stage.input.controls {
-            .keyboard => {
-                scene.shadowed_lines(.small, scene.center, scene.middle + 52.0, scene.palette.dim, "ARROWS OR WASD TO STEER", "P TO PAUSE, ESC TO QUIT", "F TOGGLES FULL SCREEN");
-            },
-            .gamepad => {
-                scene.shadowed_lines(.small, scene.center, scene.middle + 52.0, scene.palette.dim, "D-PAD OR STICK TO STEER", "OPTIONS OR START TO PAUSE", "F KEY TOGGLES FULL SCREEN");
-            },
+        scene.shadowed_wave(.large, scene.center, top + 52.0, "MEW", scene.palette.head);
+        scene.shadowed_wave(.large, scene.center, top + 112.0, "SNAKE", scene.palette.text, offset: 1);
+        self.draw_menu(scene.middle - 50.0);
+        self.draw_credits();
+        scene.draw_legend("ACCEPT", "");
+    }
+
+    fn draw_menu(top: f32) {
+        let scene = self.stage.scene;
+        let modes = Mode::all();
+        for at in 0..modes.count {
+            scene.draw_choice(top + at * 34.0f32, modes[at].label(), at == self.mode.index());
+        }
+    }
+
+    fn draw_settings() {
+        let scene = self.stage.scene;
+        let top = scene.viewport.top;
+        scene.shadowed_centered(.large, scene.center, top + 40.0, "SETTINGS", scene.palette.head);
+        for at in 0..self.settings.count {
+            self.menu.draw(self.settings[at], top + 132.0 + at * 36.0f32, at == self.setting);
         }
 
-        self.draw_credits(scene.viewport.bottom - 80.0);
+        if !Skin::gold.is_unlocked(self.stage.best()) {
+            scene.shadowed_centered(.small, scene.center, top + 140.0 + self.settings.count * 36.0f32, $"SCORE {Skin::prize()} FOR A GOLD SNAKE", scene.palette.dim);
+        }
+
+        scene.draw_legend("CHANGE", "BACK");
     }
 
     fn draw_scores() {
         let scene = self.stage.scene;
+        let easy = self.stage.settings.is_easy();
         scene.shadowed_centered(.large, scene.center, scene.viewport.top + 40.0, "HIGH SCORES", scene.palette.head);
-        scene.draw_table(self.stage.high_scores, scene.viewport.top + 140.0, .none);
-        scene.shadowed_centered(.medium, scene.center, scene.viewport.bottom - 70.0, self.stage.press, scene.palette.accent.fade(scene.blink));
+        if easy {
+            scene.shadowed_centered(.small, scene.center, scene.viewport.top + 104.0, "EASY MODE", scene.palette.leaf);
+        }
+
+        scene.draw_table(self.stage.scores(easy), scene.viewport.top + 140.0, .none);
+        scene.draw_legend("", "BACK");
     }
 
-    fn draw_credits(top: f32) {
+    fn draw_stats() {
+        let scene = self.stage.scene;
+        let top = scene.viewport.top;
+        scene.shadowed_centered(.large, scene.center, top + 40.0, "STATS", scene.palette.head);
+        let stats = self.stage.stats.list();
+        let reach: f32 = 260.0;
+        for at in 0..stats.count {
+            let y = top + 130.0 + at * 40.0f32;
+            scene.shadowed(.medium, scene.center - reach, y, stats[at].name, scene.palette.dim);
+            scene.shadowed(.medium, scene.center + reach - scene.painter.measure(.medium, stats[at].value), y, stats[at].value, scene.palette.text);
+        }
+
+        scene.draw_legend("", "BACK");
+    }
+
+    fn draw_credits() {
         let scene = self.stage.scene;
         let written = "WRITTEN IN ";
-        let left = scene.center - scene.painter.measure(.small, $"{written}MEW") / 2;
+        let left = scene.viewport.margin + 18.0;
+        let bottom = scene.viewport.bottom;
         let color = scene.palette.dim.fade(0.7);
-        scene.shadowed_centered(.small, scene.center, top + 20.0, "CREATED BY PATRIK SVENSSON", color);
-        scene.shadowed(.small, left, top + 44.0, written, color);
-        scene.shadowed(.small, left + scene.painter.measure(.small, written), top + 44.0, "MEW", scene.palette.head.fade(0.85));
+        scene.shadowed(.small, left, bottom - 66.0, "CREATED BY PATRIK SVENSSON", color);
+        scene.shadowed(.small, left, bottom - 34.0, written, color);
+        scene.shadowed(.small, left + scene.painter.measure(.small, written), bottom - 34.0, "MEW", scene.palette.head.fade(0.85));
     }
 }
 
 impl Screen<Command> for TitleScreen {
+    pub fn enter() {
+        self.stage.sounds.begin_music(self.demo.season());
+    }
+
     pub fn handle(command: Command) -> Transition<Command> {
+        if let .suspend = command {
+            return .stay;
+        }
+
         return match command {
-            .confirm | .play => .swap(PlayScreen::new(self.stage)),
+            .confirm | .play | .pause => self.choose(),
+            .back => self.show_title(),
             .quit => .quit,
-            .steer(_) | .pause | .suspend => .stay,
+            .easy => self.toggle_easy(),
+            .steer(.left) => self.steer_sideways(-1),
+            .steer(.right) => self.steer_sideways(1),
+            .steer(.up) => self.scroll(-1),
+            .steer(.down) => self.scroll(1),
+            .suspend => .stay,
         };
     }
 
     pub fn update(milliseconds: f64) -> Transition<Command> {
-        self.clock += milliseconds;
-        self.demo.update(milliseconds);
-        self.stage.scene.react(self.demo);
-        if self.demo.over {
-            self.demo = self.stage.demo();
-        }
+        self.demo = self.stage.run_demo(self.demo, milliseconds);
 
         return .stay;
     }
@@ -79,12 +251,21 @@ impl Screen<Command> for TitleScreen {
     pub fn draw() {
         let scene = self.stage.scene;
         scene.draw_game(self.demo);
-        scene.draw_best(self.stage.high_scores.best());
+        scene.draw_best(self.stage.scores(self.stage.settings.is_easy()).best(), self.stage.settings.is_easy());
         scene.shade(scene.palette.deep_shade);
-        if self.is_showing_scores() {
-            self.draw_scores();
-        } else {
-            self.draw_title();
+        match self.page {
+            .title => {
+                self.draw_title();
+            },
+            .scores => {
+                self.draw_scores();
+            },
+            .stats => {
+                self.draw_stats();
+            },
+            .settings => {
+                self.draw_settings();
+            },
         }
     }
 }

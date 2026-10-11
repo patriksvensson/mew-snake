@@ -1,0 +1,67 @@
+#load "../engine/color.mew"
+
+use engine;
+
+pub type Palette {
+    pub field background: Color;
+    pub field frame: Color;
+    pub field tile: Color;
+    pub field tile_alternate: Color;
+    pub field head: Color;
+    pub field tail: Color;
+    pub field eye: Color;
+    pub field pupil: Color;
+    pub field tongue: Color;
+    pub field food: Color;
+    pub field orange: Color;
+    pub field grape: Color;
+    pub field cherry: Color;
+    pub field gold: Color;
+    pub field dark_gold: Color;
+    pub field shine: Color;
+    pub field leaf: Color;
+    pub field stem: Color;
+    pub field crash: Color;
+    pub field portal_in: Color;
+    pub field portal_out: Color;
+    pub field text: Color;
+    pub field dim: Color;
+    pub field accent: Color;
+    pub field shade: Color;
+    pub field deep_shade: Color;
+    pub field replay: Color;
+    pub field shadow: Color;
+
+    pub static fn new() -> Palette {
+        return new Palette {
+            background: Color::rgb(13, 16, 22),
+            frame: Color::rgb(38, 46, 60),
+            tile: Color::rgb(22, 27, 36),
+            tile_alternate: Color::rgb(26, 32, 42),
+            head: Color::rgb(150, 245, 165),
+            tail: Color::rgb(30, 130, 125),
+            eye: Color::rgb(245, 247, 250),
+            pupil: Color::rgb(13, 16, 22),
+            tongue: Color::rgb(240, 70, 115),
+            food: Color::rgb(255, 92, 122),
+            orange: Color::rgb(255, 160, 50),
+            grape: Color::rgb(160, 105, 235),
+            cherry: Color::rgb(230, 40, 75),
+            gold: Color::rgb(255, 205, 70),
+            dark_gold: Color::rgb(205, 145, 35),
+            shine: Color::rgb(255, 214, 224),
+            leaf: Color::rgb(120, 210, 110),
+            stem: Color::rgb(110, 170, 80),
+            crash: Color::rgb(255, 86, 86),
+            portal_in: Color::rgb(90, 220, 255),
+            portal_out: Color::rgb(255, 110, 230),
+            text: Color::rgb(232, 236, 241),
+            dim: Color::rgb(128, 138, 156),
+            accent: Color::rgb(255, 209, 102),
+            shade: new Color { r: 8, g: 10, b: 14, a: 175 },
+            deep_shade: new Color { r: 8, g: 10, b: 14, a: 220 },
+            replay: new Color { r: 175, g: 125, b: 70, a: 60 },
+            shadow: new Color { r: 0, g: 0, b: 0, a: 160 },
+        };
+    }
+}

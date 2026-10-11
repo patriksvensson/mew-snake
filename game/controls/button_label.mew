@@ -1,0 +1,119 @@
+#load "../engine/color.mew"
+#load "../engine/geometry.mew"
+#load "../engine/sokol.mew"
+#load "../scene/palette.mew"
+
+use engine;
+use system;
+
+pub union ButtonLabel {
+    cross,
+    circle,
+    square,
+    triangle,
+    a,
+    b,
+    x,
+    y,
+    named(string),
+}
+
+impl ButtonLabel {
+    // The numbers are SDL's button labels, with 0 for unknown.
+    pub static fn of(label: i32, fallback: string) -> ButtonLabel {
+        return match label {
+            1 => .a,
+            2 => .b,
+            3 => .x,
+            4 => .y,
+            5 => .cross,
+            6 => .circle,
+            7 => .square,
+            8 => .triangle,
+            _ => .named(fallback),
+        };
+    }
+
+    pub fn color() -> Color {
+        return match self {
+            .cross => Color::rgb(125, 175, 245),
+            .circle => Color::rgb(250, 100, 110),
+            .square => Color::rgb(230, 135, 210),
+            .triangle => Color::rgb(70, 215, 165),
+            .a => Color::rgb(115, 205, 80),
+            .b => Color::rgb(245, 85, 75),
+            .x => Color::rgb(75, 145, 245),
+            .y => Color::rgb(250, 205, 60),
+            .named(_) => Color::rgb(232, 236, 241),
+        };
+    }
+
+    pub fn width(painter: Painter, size: TextSize) -> f32 {
+        return match self {
+            .named(name) => painter.measure(size, name) + size.scale() * 6.0f32,
+            _ => size.scale() * 11.0f32,
+        };
+    }
+
+    pub fn draw(painter: Painter, palette: Palette, x: f32, y: f32, size: TextSize, alpha: f32) {
+        let scale = size.scale();
+        let rim = palette.eye.mix(palette.dim, 0.3).fade(alpha);
+        let body = Color::rgb(30, 32, 40).fade(alpha);
+        let color = self.color().fade(alpha);
+        if let .named(name) = self {
+            let width = self.width(painter, size);
+            let height = scale * 11.0f32;
+            let top = y - scale * 2.0f32;
+            painter.rect(x + scale, top + scale, width, height, palette.shadow.fade(alpha));
+            painter.rect(x + scale, top, width - scale * 2.0f32, height, rim);
+            painter.rect(x, top + scale, width, height - scale * 2.0f32, rim);
+            painter.rect(x + scale * 0.8f32, top + scale * 0.8f32, width - scale * 1.6f32, height - scale * 1.6f32, body);
+            painter.write(size, x + scale * 3.0f32, y, name, color);
+            return;
+        }
+
+        let radius = scale * 5.2f32;
+        let center = new Point { x: x + scale * 5.5f32, y: y + scale * 3.5f32 };
+        let line = scale * 0.7f32;
+        let reach = radius * 0.45f32;
+        painter.circle(center.offset(scale, scale), radius, palette.shadow.fade(alpha));
+        painter.circle(center, radius, rim);
+        painter.circle(center, radius - scale * 0.8f32, body);
+        match self {
+            .cross => {
+                painter.band(center.offset(-reach, -reach), center.offset(reach, reach), line, color, color);
+                painter.band(center.offset(-reach, reach), center.offset(reach, -reach), line, color, color);
+            },
+            .circle => {
+                painter.arc(center, reach * 1.05f32, line * 1.6f32, 1.0, color);
+            },
+            .square => {
+                let side = reach * 0.9f32;
+                let corners = new Point[] { center.offset(-side, -side), center.offset(side, -side), center.offset(side, side), center.offset(-side, side) };
+                for at in 0..4 {
+                    painter.band(corners[at], corners[(at + 1) % 4], line * 0.8f32, color, color);
+                }
+            },
+            .triangle => {
+                let corners = new Point[] { center.offset(0.0, -reach * 1.1f32), center.offset(reach * 1.05f32, reach * 0.75f32), center.offset(-reach * 1.05f32, reach * 0.75f32) };
+                for at in 0..3 {
+                    painter.band(corners[at], corners[(at + 1) % 3], line * 0.8f32, color, color);
+                }
+            },
+            .a | .b | .x | .y => {
+                painter.write(size, center.x - scale * 3.5f32, center.y - scale * 3.5f32, self.letter(), color);
+            },
+            .named(_) => { },
+        }
+    }
+
+    fn letter() -> string {
+        return match self {
+            .a => "A",
+            .b => "B",
+            .x => "X",
+            .y => "Y",
+            _ => "",
+        };
+    }
+}

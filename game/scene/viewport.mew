@@ -1,5 +1,5 @@
-#load "engine/geometry.mew"
-#load "snake.mew"
+#load "../engine/geometry.mew"
+#load "../world/board.mew"
 
 use engine;
 

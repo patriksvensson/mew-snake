@@ -1,49 +1,121 @@
-#load "autopilot.mew"
-#load "game.mew"
-#load "high_scores.mew"
-#load "initials.mew"
-#load "input.mew"
-#load "scene.mew"
-#load "snake.mew"
+#load "controls/input.mew"
+#load "controls/rumble.mew"
+#load "saves/high_scores.mew"
+#load "saves/settings.mew"
+#load "saves/stats.mew"
+#load "scene/scene.mew"
+#load "screens/initials.mew"
+#load "sound/sounds.mew"
+#load "world/autopilot.mew"
+#load "world/board.mew"
+#load "world/game.mew"
 
 use system;
 
-// Everything the screens share, which outlives any one of them.
 pub type Stage {
-    pub field board: Board;
+    field board: Board;
     pub field scene: Scene;
     pub field input: Input;
-    pub field high_scores: HighScores;
+    pub field sounds: Sounds;
+    pub field rumble: Rumble;
+    field normal_scores: HighScores;
+    field easy_scores: HighScores;
+    pub field settings: Settings;
+    pub field stats: Stats;
     pub field initials: Initials;
     field autopilot: Autopilot;
     field random: Random;
 
-    pub field press: string {
-        get {
-            return match self.input.controls {
-                .keyboard => "PRESS SPACE",
-                .gamepad => "PRESS ANY BUTTON",
-            };
-        }
-    }
-
-    pub static fn new(board: Board, scene: Scene, input: Input, high_scores: HighScores) -> Stage {
-        return new Stage {
+    pub static fn new(board: Board, scene: Scene, input: Input, sounds: Sounds, settings: Settings) -> Stage {
+        let stage = new Stage {
             board: board,
             scene: scene,
             input: input,
-            high_scores: high_scores,
+            sounds: sounds,
+            rumble: Rumble::new(input),
+            normal_scores: HighScores::load(".mew-snake"),
+            easy_scores: HighScores::load(".mew-snake-easy"),
+            settings: settings,
+            stats: Stats::load(),
             initials: Initials::new(),
             autopilot: Autopilot::new(board),
             random: new Random { },
         };
+
+        stage.apply_settings();
+        return stage;
+    }
+
+    pub fn react(game: Game) {
+        self.scene.react(game);
+
+        // The snake on the title plays by itself, and quietly. Lightning is
+        // seen and felt, though not heard.
+        let lightning = self.scene.thundered();
+        if !game.demo {
+            self.sounds.react(game);
+            self.rumble.react(game);
+            if lightning {
+                self.rumble.thunder();
+            }
+
+            self.stats.react(game);
+        }
+    }
+
+    pub fn pop(game: Game, index: i32) {
+        self.scene.pop(game, index);
+        self.sounds.pop(index);
+        self.rumble.pop();
+    }
+
+    // Easy games keep a list of their own, so they do not crowd out the others.
+    pub fn scores(easy: bool) -> HighScores {
+        if easy {
+            return self.easy_scores;
+        }
+
+        return self.normal_scores;
+    }
+
+    pub fn best() -> i32 {
+        return Math::Max(self.normal_scores.best(), self.easy_scores.best());
+    }
+
+    pub fn set_fullscreen(on: bool) {
+        self.settings.set_fullscreen(on);
+        self.input.set_fullscreen(on);
+    }
+
+    pub fn apply_settings() {
+        self.scene.wear_trail(self.settings.trail());
+        self.scene.painter.crt(self.settings.is_crt());
+        self.sounds.set_volume(self.settings.music() / 10.0f32, self.settings.sounds() / 10.0f32);
+    }
+
+    pub fn change_skin(step: i32) -> Skin {
+        let skin = self.settings.skin().next(step, self.best());
+        self.settings.wear(skin);
+        self.sounds.play(.tick);
+        return skin;
     }
 
     pub fn play() -> Game {
-        return Game::play(self.board, self.random);
+        return Game::play(self.board, self.random, self.settings.is_easy(), self.settings.skin());
+    }
+
+    pub fn run_demo(demo: Game, milliseconds: f64) -> Game {
+        demo.update(milliseconds);
+        self.react(demo);
+        self.sounds.follow(demo);
+        if demo.is_over() {
+            return self.demo();
+        }
+
+        return demo;
     }
 
     pub fn demo() -> Game {
-        return Game::demo(self.board, self.random, self.autopilot);
+        return Game::demo(self.board, self.random, self.autopilot, self.settings.skin());
     }
 }

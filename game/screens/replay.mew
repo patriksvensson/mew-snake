@@ -1,0 +1,193 @@
+#load "../engine/ring.mew"
+#load "../engine/screens.mew"
+#load "../stage.mew"
+#load "../world/game.mew"
+
+use engine;
+use system;
+
+[struct]
+type Frame {
+    pub field game: Game;
+    pub field milliseconds: f64;
+}
+
+pub type Recorder {
+    field frames: Ring<Frame>;
+    mut field length: f64;
+
+    pub static fn new() -> Recorder {
+        return new Recorder { frames: Ring<Frame>::new(1200), length: 0.0 };
+    }
+
+    pub fn count() -> i32 {
+        return self.frames.count();
+    }
+
+    pub fn frame(index: i32) -> Game {
+        return self.frames.get(index).game;
+    }
+
+    pub fn time(index: i32) -> f64 {
+        return self.frames.get(index).milliseconds;
+    }
+
+    // Each frame is kept as a copy of its own, and only the last few seconds
+    // stay, however quickly frames come.
+    pub fn record(game: Game, milliseconds: f64) {
+        let mut before: Option<Game> = .none;
+        if !self.frames.is_empty() {
+            before = .some(self.frames.last().game);
+        }
+
+        if self.frames.is_full() {
+            self.forget();
+        }
+
+        self.frames.push_back(new Frame { game: game.snapshot(before), milliseconds: milliseconds });
+        self.length += milliseconds;
+        while self.frames.count() > 1 && self.length - self.frames.first().milliseconds >= keep_time() {
+            self.forget();
+        }
+    }
+
+    fn forget() {
+        let oldest = self.frames.pop_front();
+        self.length -= oldest.milliseconds;
+    }
+
+    // A little more than a replay shows, so there is always enough of it.
+    static fn keep_time() -> f64 {
+        return 4500.0;
+    }
+}
+
+pub type ReplayScreen {
+    field stage: Stage;
+    field recorder: Recorder;
+    field next: Screen<Command>;
+    field last: i32;
+    field length: f64;
+    mut field at: i32;
+    mut field owed: f64;
+    mut field hold: f64;
+    mut field left: f64;
+    mut field shown: Game;
+
+    pub static fn new(stage: Stage, recorder: Recorder, next: Screen<Command>) -> ReplayScreen {
+        let last = recorder.count() - 1;
+        let mut first = last;
+        let mut length: f64 = 0.0;
+        while first > 0 && length < replay_time() {
+            length += recorder.time(first);
+            first -= 1;
+        }
+
+        return new ReplayScreen { stage: stage, recorder: recorder, next: next, last: last, length: length, at: first, owed: 0.0, hold: 0.0, left: length, shown: recorder.frame(first) };
+    }
+
+    pub static fn is_worth(recorder: Recorder) -> bool {
+        return recorder.count() > 30;
+    }
+
+    static fn replay_time() -> f64 {
+        return 4000.0;
+    }
+
+    static fn slow_time() -> f64 {
+        return 1000.0;
+    }
+
+    fn advance() {
+        self.at += 1;
+        self.left -= self.recorder.time(self.at);
+        self.shown = self.recorder.frame(self.at);
+        self.stage.scene.react(self.shown);
+        self.stage.sounds.react(self.shown);
+    }
+
+    fn is_slow() -> bool {
+        return self.at < self.last && self.left < slow_time();
+    }
+
+    fn progress() -> f32 {
+        return (1.0 - Math::Max(0.0, self.left) / Math::Max(1.0, self.length)) as f32;
+    }
+
+    fn draw_marks() {
+        let scene = self.stage.scene;
+        let painter = scene.painter;
+        let palette = scene.palette;
+        let viewport = scene.viewport;
+        let left = viewport.margin;
+        let top = viewport.top;
+        let width = viewport.grid_width;
+        let height = viewport.grid_height;
+        scene.shade(palette.replay);
+
+        let frame = palette.crash.fade(0.35 + scene.pulse * 0.65);
+        painter.rect(left - 5.0, top - 5.0, width + 10.0, 5.0, frame);
+        painter.rect(left - 5.0, top + height, width + 10.0, 5.0, frame);
+        painter.rect(left - 5.0, top, 5.0, height, frame);
+        painter.rect(left + width, top, 5.0, height, frame);
+
+        if Math::Floor(scene.clock() / 400.0) % 2.0 == 0.0 {
+            painter.circle(new Point { x: left + 8.0, y: 34.0 }, 7.0, palette.crash);
+        }
+
+        scene.shadowed(.medium, left + 24.0, 24.0, "REPLAY", palette.crash);
+        scene.draw_hint(.accept, "SKIP", left + width - scene.hint_width(.accept, "SKIP"), 28.0);
+        if self.is_slow() {
+            scene.shadowed_centered(.small, scene.center, 28.0, "SLOW MOTION", palette.text.fade(scene.pulse));
+        }
+
+        painter.rect(left, top - 15.0, width, 3.0, palette.frame);
+        painter.rect(left, top - 15.0, width * self.progress(), 3.0, palette.crash);
+    }
+}
+
+impl Screen<Command> for ReplayScreen {
+    pub fn enter() {
+        self.stage.sounds.play(.rewind);
+        self.stage.scene.clear_popups();
+    }
+
+    pub fn handle(command: Command) -> Transition<Command> {
+        return match command {
+            .quit => .quit,
+            .confirm | .back | .play | .pause => .swap(self.next),
+            .steer(_) | .suspend | .easy => .stay,
+        };
+    }
+
+    pub fn update(milliseconds: f64) -> Transition<Command> {
+        if self.at >= self.last {
+            self.hold += milliseconds;
+            if self.hold > 1300.0 {
+                return .swap(self.next);
+            }
+
+            return .stay;
+        }
+
+        let mut speed: f64 = 1.0;
+        if self.is_slow() {
+            speed = 0.35;
+        }
+
+        self.owed += milliseconds * speed;
+        while self.at < self.last && self.owed >= self.recorder.time(self.at + 1) {
+            self.owed -= self.recorder.time(self.at + 1);
+            self.advance();
+        }
+
+        return .stay;
+    }
+
+    pub fn draw() {
+        let scene = self.stage.scene;
+        let game = self.shown;
+        scene.draw_game(game);
+        self.draw_marks();
+    }
+}

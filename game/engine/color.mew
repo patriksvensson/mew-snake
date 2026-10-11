@@ -13,6 +13,32 @@ pub type Color {
         return new Color { r: r, g: g, b: b };
     }
 
+    // Hue goes from 0 to 1 and wraps around.
+    pub static fn hsv(hue: f32, saturation: f32, value: f32) -> Color {
+        let turn = (hue - Math::Floor(hue)) * 6.0;
+        let sector = Math::Floor(turn) as i32;
+        let along = (turn - sector) as f32;
+        let low = value * (1.0 - saturation);
+        let falling = value * (1.0 - saturation * along);
+        let rising = value * (1.0 - saturation * (1.0 - along));
+        return match sector {
+            0 => unit(value, rising, low),
+            1 => unit(falling, value, low),
+            2 => unit(low, value, rising),
+            3 => unit(low, falling, value),
+            4 => unit(rising, low, value),
+            _ => unit(value, low, falling),
+        };
+    }
+
+    static fn unit(r: f32, g: f32, b: f32) -> Color {
+        return new Color { r: (r.clamp_to_unit() * 255.0) as u8, g: (g.clamp_to_unit() * 255.0) as u8, b: (b.clamp_to_unit() * 255.0) as u8 };
+    }
+
+    pub fn same(other: Color) -> bool {
+        return self.r == other.r && self.g == other.g && self.b == other.b && self.a == other.a;
+    }
+
     pub fn fade(amount: f32) -> Color {
         return new Color { r: self.r, g: self.g, b: self.b, a: self.a.scale(amount) };
     }

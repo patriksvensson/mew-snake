@@ -1,0 +1,387 @@
+#load "../engine/color.mew"
+#load "../engine/geometry.mew"
+#load "../engine/random.mew"
+#load "../engine/ring.mew"
+#load "../engine/sokol.mew"
+#load "../scene/palette.mew"
+#load "../scene/scene.mew"
+#load "../scene/skin.mew"
+#load "../scene/viewport.mew"
+#load "board.mew"
+#load "game.mew"
+
+use engine;
+use system;
+
+pub type Snake {
+    field board: Board;
+    field body: Ring<Cell>;
+    field occupied: i32[];
+    pub mut field trail: Cell;
+    mut field skin: Skin;
+    mut field view: Option<SnakeView>;
+
+    pub field length: i32 {
+        get { return self.body.count(); }
+    }
+
+    pub static fn new(board: Board, head: Cell, length: i32, skin: Skin) -> Snake {
+        let snake = new Snake {
+            board: board,
+            body: Ring<Cell>::new(board.count()),
+            occupied: new i32[board.count()],
+            trail: new Cell { x: head.x - length + 1, y: head.y },
+            skin: skin,
+            view: .none,
+        };
+
+        let mut at = length - 1;
+        while at >= 0 {
+            snake.enter(new Cell { x: head.x - at, y: head.y });
+            at -= 1;
+        }
+
+        return snake;
+    }
+
+    // A copy of the snake as it is now, for a replay, which shares its look so
+    // it goes on blinking.
+    pub fn copy() -> Snake {
+        let occupied = new i32[self.occupied.count];
+        for at in 0..occupied.count {
+            occupied[at] = self.occupied[at];
+        }
+
+        return new Snake { board: self.board, body: self.body.copy(), occupied: occupied, trail: self.trail, skin: self.skin, view: self.view };
+    }
+
+    pub fn segment(index: i32) -> Cell {
+        return self.body.get(index);
+    }
+
+    pub fn head() -> Cell {
+        return self.body.first();
+    }
+
+    pub fn tail() -> Cell {
+        return self.body.last();
+    }
+
+    // A ghostly snake can pass over itself, so a cell can hold more than one
+    // piece of it.
+    pub fn occupies(cell: Cell) -> bool {
+        return self.occupied[self.board.index(cell)] > 0;
+    }
+
+    pub fn blocks(cell: Cell, growing: bool) -> bool {
+        if !self.board.contains(cell) {
+            return true;
+        }
+
+        if !self.occupies(cell) {
+            return false;
+        }
+
+        return growing || !cell.same(self.tail());
+    }
+
+    pub fn advance(next: Cell, growing: bool) {
+        let tail = self.tail();
+        self.trail = tail;
+        if !growing {
+            self.body.pop_back();
+            self.occupied[self.board.index(tail)] -= 1;
+        }
+
+        self.enter(next);
+    }
+
+    pub fn retreat() {
+        let head = self.body.pop_front();
+        self.occupied[self.board.index(head)] -= 1;
+        self.body.push_back(self.trail);
+        self.occupied[self.board.index(self.trail)] += 1;
+    }
+
+    pub fn shrink(length: i32) {
+        while self.body.count() > length {
+            let tail = self.body.pop_back();
+            self.occupied[self.board.index(tail)] -= 1;
+        }
+
+        self.trail = self.tail();
+    }
+
+    pub fn skin() -> Skin {
+        return self.skin;
+    }
+
+    pub fn wear(skin: Skin) {
+        self.skin = skin;
+    }
+
+    pub fn draw(scene: Scene, game: Game, gone: i32) {
+        self.look(scene).draw(self, game, gone);
+    }
+
+    pub fn head_point(scene: Scene, game: Game) -> Point {
+        return self.look(scene).head_point(self, game);
+    }
+
+    pub fn color(scene: Scene, game: Game, at: i32) -> Color {
+        return self.look(scene).color(self, game, at);
+    }
+
+    fn enter(cell: Cell) {
+        self.body.push_front(cell);
+        self.occupied[self.board.index(cell)] += 1;
+    }
+
+    // A snake only gets a look once it is first drawn, since the game that
+    // makes it knows nothing of the scene.
+    fn look(scene: Scene) -> SnakeView {
+        if let .some(view) = self.view {
+            return view;
+        }
+
+        let view = SnakeView::new(scene);
+        self.view = .some(view);
+        return view;
+    }
+}
+
+type SnakeView {
+    field scene: Scene;
+    field painter: Painter;
+    field palette: Palette;
+    field viewport: Viewport;
+    field points: Point[];
+    field colors: Color[];
+    field random: Random;
+    mut field blinking: f64;
+    mut field licking: f64;
+
+    pub static fn new(scene: Scene) -> SnakeView {
+        let points = scene.viewport.board.count() + 1;
+        return new SnakeView {
+            scene: scene,
+            painter: scene.painter,
+            palette: scene.palette,
+            viewport: scene.viewport,
+            points: new Point[points],
+            colors: new Color[points],
+            random: new Random { },
+            blinking: scene.clock() + 2000.0,
+            licking: scene.clock() + 3500.0,
+        };
+    }
+
+    pub fn color(snake: Snake, game: Game, at: i32) -> Color {
+        let mut color = snake.skin().color(self.palette, at, snake.length + 1, self.scene.clock());
+
+        let ghost = game.power_left(.ghost);
+        if ghost > 0.0 && (ghost > 1500.0 || Math::Floor(self.scene.clock() / 120.0) % 2.0 == 0.0) {
+            color = color.fade(0.45);
+        }
+        if game.is_over() {
+            return color.mix(self.palette.crash, self.scene.shake() * 0.8);
+        }
+
+        return color;
+    }
+
+    pub fn head_point(snake: Snake, game: Game) -> Point {
+        return self.arriving(snake.segment(1), snake.head(), self.ease_progress(game));
+    }
+
+    pub fn draw(snake: Snake, game: Game, gone: i32) {
+        let viewport = self.viewport;
+        if gone >= snake.length {
+            return;
+        }
+
+        self.plan_face();
+
+        let t = self.ease_progress(game);
+        let count = snake.length + 1;
+        let points = self.points;
+        let colors = self.colors;
+
+        points[0] = self.arriving(snake.segment(1), snake.head(), t);
+        for at in 1..snake.length {
+            points[at] = viewport.center(snake.segment(at));
+        }
+
+        points[count - 1] = self.arriving(snake.trail, snake.tail(), t);
+
+        for at in 0..count {
+            colors[at] = self.color(snake, game, at);
+        }
+
+        let radius = viewport.cell * 0.36;
+        let mut at = count - 1;
+        while at > gone {
+            self.link(points[at], points[at - 1], radius, colors[at], colors[at - 1]);
+            at -= 1;
+        }
+
+        for at in Math::Max(1, gone)..count {
+            if at == gone || at == count - 1 || self.is_corner(at) {
+                self.painter.circle(points[at], radius, colors[at]);
+            }
+        }
+
+        if gone == 0 {
+            self.draw_head(game, points[0], radius * 1.2, colors[0]);
+        }
+    }
+
+    fn plan_face() {
+        let clock = self.scene.clock();
+        if clock > self.blinking + blink_time() {
+            self.blinking = self.later(clock, 2000.0, 5500.0);
+        }
+
+        if clock > self.licking + lick_time() {
+            self.licking = self.later(clock, 2500.0, 7000.0);
+        }
+    }
+
+    fn later(clock: f64, soonest: f64, latest: f64) -> f64 {
+        return clock + Chance::between(self.random, soonest, latest);
+    }
+
+    fn arriving(from: Cell, to: Cell, progress: f32) -> Point {
+        let end = self.viewport.center(to);
+        let way = self.across(self.viewport.center(from), end);
+        if self.is_jump(way) {
+            return end;
+        }
+
+        return end.offset(-way.x * (1.0 - progress), -way.y * (1.0 - progress));
+    }
+
+    // Pieces further apart than neighbouring cells are on either side of a
+    // portal.
+    fn is_jump(way: Point) -> bool {
+        let reach = self.viewport.cell * 1.5;
+        return Math::Abs(way.x) > reach || Math::Abs(way.y) > reach;
+    }
+
+    // The shortest way from one point to another, through a wall when that is
+    // closer.
+    fn across(from: Point, to: Point) -> Point {
+        let width = self.viewport.grid_width;
+        let height = self.viewport.grid_height;
+        let mut x = to.x - from.x;
+        let mut y = to.y - from.y;
+        if x > width / 2 {
+            x -= width;
+        } else if x < -width / 2 {
+            x += width;
+        }
+
+        if y > height / 2 {
+            y -= height;
+        } else if y < -height / 2 {
+            y += height;
+        }
+
+        return new Point { x: x, y: y };
+    }
+
+    fn link(from: Point, to: Point, radius: f32, from_color: Color, to_color: Color) {
+        let way = self.across(from, to);
+        if self.is_jump(way) {
+            self.painter.circle(from, radius, from_color);
+            self.painter.circle(to, radius, to_color);
+            return;
+        }
+
+        self.painter.band(from, from.offset(way.x, way.y), radius, from_color, to_color);
+        if way.x != to.x - from.x || way.y != to.y - from.y {
+            self.painter.band(to.offset(-way.x, -way.y), to, radius, from_color, to_color);
+        }
+    }
+
+    fn ease_progress(game: Game) -> f32 {
+        if game.is_over() {
+            return 1.0;
+        }
+
+        let linear = game.progress();
+        return 1.0 - (1.0 - linear) * (1.0 - linear);
+    }
+
+    fn is_corner(at: i32) -> bool {
+        let before = self.points[at - 1];
+        let here = self.points[at];
+        let after = self.points[at + 1];
+        let cross = (before.x - here.x) * (after.y - here.y) - (before.y - here.y) * (after.x - here.x);
+        return Math::Abs(cross) > 0.01;
+    }
+
+    fn draw_head(game: Game, center: Point, radius: f32, color: Color) {
+        let forward = new Point { x: game.heading().dx() * radius, y: game.heading().dy() * radius };
+        let side = new Point { x: -forward.y, y: forward.x };
+        if !game.is_over() {
+            self.draw_tongue(center, forward, side);
+        }
+
+        self.painter.circle(center, radius, color);
+
+        let food = self.viewport.center(game.food());
+        let mut look = new Point { x: food.x - center.x, y: food.y - center.y };
+        let distance = Math::Sqrt(look.x * look.x + look.y * look.y) as f32;
+        if distance > 1.0 {
+            look = new Point { x: look.x / distance * radius * 0.15, y: look.y / distance * radius * 0.15 };
+        }
+
+        let size = radius * 0.36;
+        let dazed = game.is_over() && !game.has_won();
+        let closed = self.scene.clock() >= self.blinking;
+        for way in new f32[] { -1.0, 1.0 } {
+            let eye = center.offset(forward.x * 0.3 + side.x * 0.45 * way, forward.y * 0.3 + side.y * 0.45 * way);
+            if dazed {
+                self.painter.circle(eye, size, self.palette.eye);
+                self.stroke(eye, size * 0.7, size * 0.7, self.palette.pupil);
+                self.stroke(eye, size * 0.7, -size * 0.7, self.palette.pupil);
+            } else if closed {
+                self.stroke(eye, forward.x * 0.36, forward.y * 0.36, self.palette.pupil);
+            } else {
+                self.painter.circle(eye, size, self.palette.eye);
+                self.painter.circle(eye.offset(look.x, look.y), radius * 0.19, self.palette.pupil);
+            }
+        }
+    }
+
+    fn draw_tongue(center: Point, forward: Point, side: Point) {
+        let age = self.scene.clock() - self.licking;
+        if age < 0.0 {
+            return;
+        }
+
+        let reach = Math::Sin(age / lick_time() * 3.141592653589793) as f32;
+        let base = center.offset(forward.x * 0.6, forward.y * 0.6);
+        let tip = center.offset(forward.x * (0.95 + 0.8 * reach), forward.y * (0.95 + 0.8 * reach));
+        let fork = 0.35 * reach;
+        let width: f32 = 1.0;
+        self.painter.band(base, tip, width, self.palette.tongue, self.palette.tongue);
+        for way in new f32[] { -1.0, 1.0 } {
+            let prong = tip.offset((forward.x * 0.85 + side.x * 0.5 * way) * fork, (forward.y * 0.85 + side.y * 0.5 * way) * fork);
+            self.painter.band(tip, prong, width * 0.8, self.palette.tongue, self.palette.tongue);
+        }
+    }
+
+    fn stroke(center: Point, dx: f32, dy: f32, color: Color) {
+        self.painter.band(center.offset(-dx, -dy), center.offset(dx, dy), 1.1, color, color);
+    }
+
+    static fn blink_time() -> f64 {
+        return 140.0;
+    }
+
+    static fn lick_time() -> f64 {
+        return 320.0;
+    }
+}

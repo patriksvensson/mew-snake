@@ -1,0 +1,168 @@
+#load "../engine/color.mew"
+#load "../engine/geometry.mew"
+#load "../engine/random.mew"
+#load "../engine/sokol.mew"
+#load "../world/season.mew"
+#load "viewport.mew"
+
+use engine;
+use system;
+
+pub type Shower {
+    field viewport: Viewport;
+    field random: Random;
+    field x: f32[];
+    field y: f32[];
+    mut field wait: f64;
+    mut field time: f64;
+    mut field next_thunder: f64;
+    mut field flash: f32;
+    mut field thundered: bool;
+
+    pub static fn new(viewport: Viewport) -> Shower {
+        let shower = new Shower {
+            viewport: viewport,
+            random: new Random { },
+            x: new f32[80],
+            y: new f32[80],
+            wait: 0.0,
+            time: 0.0,
+            next_thunder: 0.0,
+            flash: 0.0,
+            thundered: false,
+        };
+
+        shower.wait = Chance::between(shower.random, 25000.0, 45000.0);
+        for at in 0..shower.x.count {
+            shower.x[at] = viewport.margin + Chance::unit(shower.random) * (viewport.grid_width + 120.0);
+            shower.y[at] = viewport.top + Chance::unit(shower.random) * viewport.grid_height;
+        }
+
+        return shower;
+    }
+
+    // Returns true once for each clap of thunder, so it can be felt as well as
+    // seen.
+    pub fn thundered() -> bool {
+        let thundered = self.thundered;
+        self.thundered = false;
+        return thundered;
+    }
+
+    pub fn flash() -> f32 {
+        return self.flash;
+    }
+
+    pub fn update(milliseconds: f64, season: Season) {
+        let seconds = (milliseconds / 1000.0) as f32;
+        self.flash = Math::Max(0.0, self.flash - seconds * 4.0);
+        if self.wait > 0.0 {
+            self.wait -= milliseconds;
+            if self.wait <= 0.0 {
+                // Winter has its snow, so the rain waits for another season.
+                if let .winter = season {
+                    self.wait = Chance::between(self.random, 20000.0, 40000.0);
+                } else {
+                    self.time = 0.0;
+                    self.next_thunder = Chance::between(self.random, 2500.0, 4500.0);
+                }
+            }
+
+            return;
+        }
+
+        self.time += milliseconds;
+        if self.time > rain_time() + rainbow_time() {
+            self.wait = Chance::between(self.random, 60000.0, 100000.0);
+            return;
+        }
+
+        if self.time < rain_time() - 2000.0 && self.time >= self.next_thunder {
+            self.flash = 1.0;
+            self.thundered = true;
+            self.next_thunder += Chance::between(self.random, 3500.0, 7000.0);
+        }
+
+        let viewport = self.viewport;
+        for at in 0..self.x.count {
+            self.y[at] += 520.0 * seconds;
+            self.x[at] -= 130.0 * seconds;
+            if self.y[at] > viewport.bottom {
+                self.y[at] = viewport.top - Chance::unit(self.random) * 40.0;
+                self.x[at] = viewport.margin + Chance::unit(self.random) * (viewport.grid_width + 120.0);
+            }
+        }
+    }
+
+    pub fn draw_behind(painter: Painter) {
+        let viewport = self.viewport;
+        let rain = self.rain();
+        if rain > 0.0 {
+            painter.rect(viewport.margin, viewport.top, viewport.grid_width, viewport.grid_height, Color::rgb(20, 30, 50).fade(0.3 * rain));
+        }
+
+        let bow = self.rainbow();
+        if bow > 0.0 {
+            let colors = new Color[] {
+                Color::rgb(255, 90, 90),
+                Color::rgb(255, 165, 70),
+                Color::rgb(255, 230, 90),
+                Color::rgb(120, 220, 110),
+                Color::rgb(90, 170, 255),
+                Color::rgb(150, 110, 235),
+            };
+            let center = new Point { x: viewport.margin + viewport.grid_width / 2, y: viewport.bottom };
+            let width: f32 = 9.0;
+            for at in 0..colors.count {
+                painter.arc(center, viewport.grid_width * 0.42 - at * width, width, 0.5, colors[at].fade(0.22 * bow), from: 0.75);
+            }
+        }
+    }
+
+    pub fn draw_front(painter: Painter) {
+        let viewport = self.viewport;
+        let rain = self.rain();
+        let drops = (self.x.count * rain) as i32;
+        for at in 0..drops {
+            let top = new Point { x: self.x[at], y: self.y[at] };
+            let bottom = top.offset(-3.0, 12.0);
+            if top.x > viewport.margin && bottom.x < viewport.margin + viewport.grid_width && top.y > viewport.top && bottom.y < viewport.bottom {
+                painter.band(top, bottom, 0.7, Color::rgb(190, 215, 255).fade(0.25), Color::rgb(190, 215, 255).fade(0.5));
+            }
+        }
+
+        if self.flash > 0.0 {
+            painter.rect(viewport.margin, viewport.top, viewport.grid_width, viewport.grid_height, Color::rgb(235, 240, 255).fade(0.4 * self.flash));
+        }
+    }
+
+    fn rain() -> f32 {
+        if self.wait > 0.0 || self.time >= rain_time() {
+            return 0.0;
+        }
+
+        return ease(self.time, rain_time());
+    }
+
+    fn rainbow() -> f32 {
+        if self.wait > 0.0 || self.time < rain_time() {
+            return 0.0;
+        }
+
+        return ease(self.time - rain_time(), rainbow_time());
+    }
+
+    static fn ease(time: f64, length: f64) -> f32 {
+        let edge = 1500.0;
+        return Math::Min(1.0, Math::Min(time / edge, (length - time) / edge)) as f32;
+    }
+
+    static fn rain_time() -> f64 {
+        return 12000.0;
+    }
+
+    static fn rainbow_time() -> f64 {
+        return 7000.0;
+    }
+
+}

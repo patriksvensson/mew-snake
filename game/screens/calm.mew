@@ -1,0 +1,19 @@
+use system;
+
+// A screen that comes up as a game ends waits a moment, so buttons still being
+// pressed for the game do not rush past it.
+pub type Calm {
+    mut field left: f64;
+
+    pub static fn new() -> Calm {
+        return new Calm { left: 800.0 };
+    }
+
+    pub fn pass(milliseconds: f64) {
+        self.left = Math::Max(0.0, self.left - milliseconds);
+    }
+
+    pub fn is_settled() -> bool {
+        return self.left <= 0.0;
+    }
+}

@@ -10,10 +10,13 @@ use system;
 static external fn glue_setup(samples: i32) -> void;
 
 [ffi("sokol")]
-static external fn glue_begin(width: i32, height: i32, r: f32, g: f32, b: f32) -> void;
+static external fn glue_crt(on: i32) -> void;
 
 [ffi("sokol")]
-static external fn glue_viewport(x: i32, y: i32, width: i32, height: i32) -> void;
+static external fn glue_begin(width: i32, height: i32, x: i32, y: i32, area_width: i32, area_height: i32, r: f32, g: f32, b: f32) -> void;
+
+[ffi("sokol")]
+static external fn glue_layer(layer: i32) -> void;
 
 [ffi("sokol")]
 static external fn glue_text(size: i32) -> void;
@@ -32,6 +35,12 @@ static external fn sgl_matrix_mode_modelview() -> void;
 
 [ffi("sokol")]
 static external fn sgl_ortho(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) -> void;
+
+[ffi("sokol")]
+static external fn sgl_scissor_rect(x: i32, y: i32, width: i32, height: i32, origin_top_left: bool) -> void;
+
+[ffi("sokol")]
+static external fn sgl_scissor_rectf(x: f32, y: f32, width: f32, height: f32, origin_top_left: bool) -> void;
 
 [ffi("sokol")]
 static external fn sgl_push_matrix() -> void;
@@ -100,6 +109,10 @@ pub type Painter {
     field window: Window;
     field cosines: f32[];
     field sines: f32[];
+    mut field ratio: f32;
+    mut field left: i32;
+    mut field top: i32;
+    mut field pixels: Size;
 
     pub static fn new(window: Window, segments: i32 = 24) -> Painter {
         glue_setup(window.samples);
@@ -117,19 +130,45 @@ pub type Painter {
             sines[at] = Math::Sin(angle) as f32;
         }
 
-        return new Painter { window: window, cosines: cosines, sines: sines };
+        return new Painter {
+            window: window,
+            cosines: cosines,
+            sines: sines,
+            ratio: 1.0,
+            left: 0,
+            top: 0,
+            pixels: new Size { width: 0, height: 0 },
+        };
+    }
+
+    pub fn crt(on: bool) {
+        let mut flag = 0;
+        if on {
+            flag = 1;
+        }
+
+        glue_crt(flag);
     }
 
     pub fn begin(background: Color) {
+        // The scene keeps its shape on any screen, with the background colour
+        // filling the rest.
         let pixels = self.window.pixels();
-        glue_begin(pixels.width, pixels.height, background.r.to_unit(), background.g.to_unit(), background.b.to_unit());
-
-        // The scene keeps its shape on any screen, with the background color filling the rest.
         let size = self.window.size;
         let scale = Math::Min((pixels.width as f32) / size.width, (pixels.height as f32) / size.height);
         let width = (size.width * scale) as i32;
         let height = (size.height * scale) as i32;
-        glue_viewport((pixels.width - width) / 2, (pixels.height - height) / 2, width, height);
+        let left = (pixels.width - width) / 2;
+        let top = (pixels.height - height) / 2;
+        glue_begin(pixels.width, pixels.height, left, top, width, height, background.r.to_unit(), background.g.to_unit(), background.b.to_unit());
+
+        // The television look draws the scene into an image the size of the
+        // window, so it lies in the same place either way.
+        self.ratio = scale;
+        self.left = left;
+        self.top = top;
+        self.pixels = pixels;
+
         sgl_matrix_mode_projection();
         sgl_ortho(0.0, self.window.size.width, self.window.size.height, 0.0, -1.0, 1.0);
         sgl_matrix_mode_modelview();
@@ -142,6 +181,19 @@ pub type Painter {
 
     pub fn shutdown() {
         glue_shutdown();
+    }
+
+    // Whatever goes on layer 1 covers everything on layer 0, text included.
+    pub fn layer(index: i32) {
+        glue_layer(index);
+    }
+
+    pub fn clip(x: f32, y: f32, width: f32, height: f32) {
+        sgl_scissor_rectf(self.left + x * self.ratio, self.top + y * self.ratio, width * self.ratio, height * self.ratio, true);
+    }
+
+    pub fn unclip() {
+        sgl_scissor_rect(0, 0, self.pixels.width, self.pixels.height, true);
     }
 
     pub fn shift(x: f32, y: f32) {
@@ -192,6 +244,14 @@ pub type Painter {
         sgl_end();
     }
 
+    pub fn sparkle(center: Point, size: f32, color: Color) {
+        let thin = size * 0.3;
+        self.triangle(center.offset(0.0, -size), center.offset(thin, 0.0), center.offset(-thin, 0.0), color);
+        self.triangle(center.offset(0.0, size), center.offset(-thin, 0.0), center.offset(thin, 0.0), color);
+        self.triangle(center.offset(-size, 0.0), center.offset(0.0, -thin), center.offset(0.0, thin), color);
+        self.triangle(center.offset(size, 0.0), center.offset(0.0, thin), center.offset(0.0, -thin), color);
+    }
+
     pub fn circle(center: Point, radius: f32, color: Color) {
         let count = self.cosines.count;
         sgl_begin_triangles();
@@ -201,6 +261,27 @@ pub type Painter {
             sgl_v2f(center.x, center.y);
             sgl_v2f(center.x + self.cosines[at] * radius, center.y + self.sines[at] * radius);
             sgl_v2f(center.x + self.cosines[next] * radius, center.y + self.sines[next] * radius);
+        }
+
+        sgl_end();
+    }
+
+    // A ring that runs clockwise for the given share of a full turn, starting
+    // from the top unless told otherwise.
+    pub fn arc(center: Point, radius: f32, width: f32, amount: f32, color: Color, from: f32 = 0.0) {
+        let turn = 6.283185307179586;
+        let steps = Math::Max(1, Math::Ceiling(amount * 48.0) as i32);
+        let inner = radius - width / 2;
+        let outer = radius + width / 2;
+        sgl_begin_quads();
+        sgl_c4b(color.r, color.g, color.b, color.a);
+        for at in 0..steps {
+            let start = turn * (from + amount * at / steps - 0.25);
+            let to = turn * (from + amount * (at + 1) / steps - 0.25);
+            sgl_v2f(center.x + (Math::Cos(start) * inner) as f32, center.y + (Math::Sin(start) * inner) as f32);
+            sgl_v2f(center.x + (Math::Cos(start) * outer) as f32, center.y + (Math::Sin(start) * outer) as f32);
+            sgl_v2f(center.x + (Math::Cos(to) * outer) as f32, center.y + (Math::Sin(to) * outer) as f32);
+            sgl_v2f(center.x + (Math::Cos(to) * inner) as f32, center.y + (Math::Sin(to) * inner) as f32);
         }
 
         sgl_end();
@@ -229,9 +310,13 @@ pub type Painter {
     }
 
     pub fn write(size: TextSize, x: f32, y: f32, text: string, color: Color) {
+        // Text between screen pixels picks up stray rows from its neighbours in
+        // the font.
+        let left = (Math::Round(x * self.ratio) / self.ratio) as f32;
+        let top = (Math::Round(y * self.ratio) / self.ratio) as f32;
         let scale = size.scale();
         glue_text(size.context());
-        sdtx_pos(x / (8 * scale), y / (8 * scale));
+        sdtx_pos(left / (8 * scale), top / (8 * scale));
         sdtx_color4b(color.r, color.g, color.b, color.a);
         sdtx_puts(text);
     }

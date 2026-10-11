@@ -1,0 +1,109 @@
+#load "../engine/screens.mew"
+#load "../stage.mew"
+
+use engine;
+use system;
+
+pub type DissolveScreen {
+    field stage: Stage;
+    field next: Screen<Command>;
+    field order: f32[];
+    field columns: i32;
+    field left: f32;
+    field top: f32;
+    mut field time: f64;
+    mut field covered: bool;
+
+    pub static fn new(stage: Stage, next: Screen<Command>) -> DissolveScreen {
+        let viewport = stage.scene.viewport;
+        let left = viewport.margin - Math::Ceiling(viewport.margin / viewport.cell) * viewport.cell;
+        let top = viewport.top - Math::Ceiling(viewport.top / viewport.cell) * viewport.cell;
+        let columns = Math::Ceiling((viewport.width - left) / viewport.cell) as i32;
+        let rows = Math::Ceiling((viewport.height - top) / viewport.cell) as i32;
+
+        let random = new Random { };
+        let order = new f32[columns * rows];
+        for at in 0..order.count {
+            let diagonal = ((at % columns) + (at / columns)) / ((columns + rows - 2) as f32);
+            order[at] = (diagonal * 0.75 + random.NextDouble() * 0.25) as f32;
+        }
+
+        return new DissolveScreen {
+            stage: stage,
+            next: next,
+            order: order,
+            columns: columns,
+            left: left as f32,
+            top: top as f32,
+            time: 0.0,
+            covered: false,
+        };
+    }
+
+    pub static fn to(stage: Stage, next: Screen<Command>, cue: Cue) -> Transition<Command> {
+        stage.sounds.play(cue);
+        return .push(DissolveScreen::new(stage, next));
+    }
+
+    static fn half() -> f64 {
+        return 380.0;
+    }
+
+    fn draw_tiles(progress: f32) {
+        let spread: f32 = 0.3;
+        let scene = self.stage.scene;
+        let cell = scene.viewport.cell;
+        for at in 0..self.order.count {
+            let mut amount = Math::Clamp((progress * (1.0 + spread) - self.order[at]) / spread, 0.0, 1.0);
+            if self.covered {
+                amount = 1.0 - amount;
+            }
+
+            if amount > 0.0 {
+                let size = (cell + 1.0) * amount;
+                let x = self.left + (at % self.columns + 0.5f32) * cell;
+                let y = self.top + (at / self.columns + 0.5f32) * cell;
+                scene.painter.rect(x - size / 2, y - size / 2, size, size, scene.palette.background);
+            }
+        }
+    }
+}
+
+impl Screen<Command> for DissolveScreen {
+    pub fn is_transparent() -> bool {
+        return !self.covered;
+    }
+
+    pub fn handle(command: Command) -> Transition<Command> {
+        return match command {
+            .quit => .quit,
+            _ => .stay,
+        };
+    }
+
+    pub fn update(milliseconds: f64) -> Transition<Command> {
+        self.time += milliseconds;
+        if !self.covered && self.time >= half() {
+            self.covered = true;
+            self.time -= half();
+            return .reset(self);
+        }
+
+        if self.covered && self.time >= half() {
+            return .swap(self.next);
+        }
+
+        return .stay;
+    }
+
+    pub fn draw() {
+        if self.covered {
+            self.next.draw();
+        }
+
+        let painter = self.stage.scene.painter;
+        painter.layer(1);
+        self.draw_tiles(Math::Min(1.0, self.time / half()) as f32);
+        painter.layer(0);
+    }
+}

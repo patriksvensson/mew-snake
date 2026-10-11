@@ -1,0 +1,135 @@
+#load "../scene/skin.mew"
+#load "../scene/trail.mew"
+#load "save_file.mew"
+
+use std.collections;
+use system;
+
+pub type Settings {
+    field file: SaveFile;
+    mut field easy: bool;
+    mut field skin: Skin;
+    mut field trail: Trail;
+    mut field crt: bool;
+    mut field fullscreen: bool;
+    mut field music: i32;
+    mut field sounds: i32;
+
+    pub static fn load() -> Settings {
+        let settings = new Settings { file: SaveFile::named(".mew-snake-settings", "settings"), easy: false, skin: .green, trail: .none, crt: true, fullscreen: true, music: 7, sounds: 10 };
+        settings.file.each(|name, value| settings.read(name, value));
+        return settings;
+    }
+
+    pub fn is_easy() -> bool {
+        return self.easy;
+    }
+
+    pub fn is_crt() -> bool {
+        return self.crt;
+    }
+
+    pub fn toggle_crt() {
+        self.crt = !self.crt;
+        self.save();
+    }
+
+    pub fn is_fullscreen() -> bool {
+        return self.fullscreen;
+    }
+
+    pub fn set_fullscreen(on: bool) {
+        if on != self.fullscreen {
+            self.fullscreen = on;
+            self.save();
+        }
+    }
+
+    // Volumes go from nothing to ten.
+    pub fn music() -> i32 {
+        return self.music;
+    }
+
+    pub fn sounds() -> i32 {
+        return self.sounds;
+    }
+
+    pub fn set_music(music: i32) {
+        self.music = Math::Clamp(music, 0, 10);
+        self.save();
+    }
+
+    pub fn set_sounds(sounds: i32) {
+        self.sounds = Math::Clamp(sounds, 0, 10);
+        self.save();
+    }
+
+    pub fn skin() -> Skin {
+        return self.skin;
+    }
+
+    pub fn trail() -> Trail {
+        return self.trail;
+    }
+
+    pub fn set_trail(trail: Trail) {
+        self.trail = trail;
+        self.save();
+    }
+
+    pub fn toggle_easy() {
+        self.easy = !self.easy;
+        self.save();
+    }
+
+    pub fn wear(skin: Skin) {
+        self.skin = skin;
+        self.save();
+    }
+
+    fn read(name: string, value: string) {
+        if name == "easy" {
+            self.easy = value == "true";
+        }
+
+        if name == "skin" {
+            self.skin = Skin::named(value);
+        }
+
+        if name == "trail" {
+            self.trail = Trail::named(value);
+        }
+
+        if name == "crt" {
+            self.crt = value == "true";
+        }
+
+        if name == "fullscreen" {
+            self.fullscreen = value == "true";
+        }
+
+        if name == "music" {
+            if let .ok(music) = value.parse_i32() {
+                self.music = Math::Clamp(music, 0, 10);
+            }
+        }
+
+        if name == "sounds" {
+            if let .ok(sounds) = value.parse_i32() {
+                self.sounds = Math::Clamp(sounds, 0, 10);
+            }
+        }
+    }
+
+    fn save() {
+        let lines = List<string>::new();
+        lines.add($"easy={self.easy}");
+        lines.add($"skin={self.skin}");
+        lines.add($"trail={self.trail}");
+        lines.add($"crt={self.crt}");
+        lines.add($"fullscreen={self.fullscreen}");
+        lines.add($"music={self.music}");
+        lines.add($"sounds={self.sounds}");
+        self.file.write(lines);
+    }
+}

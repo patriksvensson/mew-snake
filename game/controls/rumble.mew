@@ -1,0 +1,48 @@
+#load "../world/game.mew"
+#load "input.mew"
+
+pub type Rumble {
+    field input: Input;
+
+    pub static fn new(input: Input) -> Rumble {
+        return new Rumble { input: input };
+    }
+
+    pub fn react(game: Game) {
+        for moment in game.moments {
+            match moment {
+                .ate(bite) => {
+                    if bite.fruit.is_golden() {
+                        self.input.rumble(0.35, 0.8, 180);
+                    } else {
+                        self.input.rumble(0.15, 0.3 + bite.combo * 0.05f32, 70);
+                    }
+                },
+                .faded(_) | .vanished(_) | .appeared(_, _) | .escaped(_) | .season_turned(_) => { },
+                .caught(_, _, _) => {
+                    self.input.rumble(0.4, 0.8, 200);
+                },
+                .frenzy_began => {
+                    self.input.rumble(0.3, 0.6, 250);
+                },
+                .warped(_, _) => {
+                    self.input.rumble(0.1, 0.4, 90);
+                },
+                .powered(_, _) => {
+                    self.input.rumble(0.3, 0.6, 150);
+                },
+                .crashed(_) => {
+                    self.input.rumble(1.0, 0.8, 400);
+                },
+            }
+        }
+    }
+
+    pub fn thunder() {
+        self.input.rumble(0.6, 0.1, 500);
+    }
+
+    pub fn pop() {
+        self.input.rumble(0.0, 0.3, 45);
+    }
+}

@@ -1,0 +1,38 @@
+use std.collections;
+use std.io;
+use system;
+
+pub type SaveFile {
+    field path: string;
+    field what: string;
+
+    // What the file holds is named in any error about saving it.
+    pub static fn named(name: string, what: string) -> SaveFile {
+        return new SaveFile { path: $"{Environment::GetEnvironmentVariable("HOME")}/{name}", what: what };
+    }
+
+    pub fn lines() -> string[] {
+        if exists(self.path) {
+            if let .ok(text) = read_text(file(self.path)) {
+                return text.lines();
+            }
+        }
+
+        return new string[0];
+    }
+
+    pub fn each(read: fn(string, string) -> void) {
+        for line in self.lines() {
+            let parts = line.trim_end().split('=');
+            if parts.count == 2 {
+                read(parts[0], parts[1]);
+            }
+        }
+    }
+
+    pub fn write(lines: List<string>) {
+        if let .err(problem) = write_text(file(self.path), string::join("\n", lines)) {
+            eprintln($"The {self.what} could not be saved: {problem}");
+        }
+    }
+}

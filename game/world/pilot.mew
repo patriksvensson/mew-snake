@@ -1,11 +1,11 @@
-#load "engine/ring.mew"
-#load "game_state.mew"
-#load "snake.mew"
+#load "../engine/ring.mew"
+#load "board.mew"
+#load "game.mew"
 
 use engine;
 
 pub interface Pilot {
-    fn steer(state: GameState) -> Direction;
+    fn steer(game: Game) -> Direction;
 }
 
 pub type Player {
@@ -36,9 +36,9 @@ pub type Player {
 }
 
 impl Pilot for Player {
-    pub fn steer(state: GameState) -> Direction {
+    pub fn steer(game: Game) -> Direction {
         if self.turns.is_empty() {
-            return state.heading;
+            return game.heading();
         }
 
         return self.turns.pop_front();

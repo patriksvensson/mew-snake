@@ -1,0 +1,261 @@
+#load "../engine/sdl.mew"
+#load "../world/board.mew"
+#load "button_label.mew"
+
+use engine;
+use system;
+
+pub union Command {
+    steer(Direction),
+    confirm,
+    back,
+    // Any other gamepad button, which starts or resumes play but never pauses
+    // it.
+    play,
+    pause,
+    suspend,
+    easy,
+    quit,
+}
+
+pub union Request {
+    command(Command),
+    fullscreen,
+    turned_fullscreen(bool),
+}
+
+pub union Controls {
+    keyboard,
+    gamepad,
+}
+
+pub union Prompt {
+    accept,
+    back,
+}
+
+pub type Input {
+    field window: Window;
+    field stick: Stick;
+    mut field request: Option<Request>;
+
+    pub field controls: Controls {
+        get {
+            if self.window.has_gamepad() {
+                return .gamepad;
+            }
+
+            return .keyboard;
+        }
+    }
+
+    pub static fn new(window: Window) -> Input {
+        return new Input { window: window, stick: Stick::new(), request: .none };
+    }
+
+    pub fn button(prompt: Prompt) -> ButtonLabel {
+        if let .keyboard = self.controls {
+            return key(prompt);
+        }
+
+        return match prompt {
+            .accept => ButtonLabel::of(self.window.label(0), "X"),
+            .back => ButtonLabel::of(self.window.label(1), "O"),
+        };
+    }
+
+    static fn key(prompt: Prompt) -> ButtonLabel {
+        return match prompt {
+            .accept => .named("SPACE"),
+            .back => .named("ESC"),
+        };
+    }
+
+    pub fn rumble(low: f32, high: f32, milliseconds: u32) {
+        self.window.rumble(low, high, milliseconds);
+    }
+
+    pub fn light(color: Color) {
+        self.window.light(color);
+    }
+
+    pub fn set_fullscreen(on: bool) {
+        self.window.set_fullscreen(on);
+    }
+
+    static fn read(event: Event) -> Option<Request> {
+        return match event {
+            .quit => command(.quit),
+            .focus_lost | .gamepad_removed(_) => command(.suspend),
+            .key(key) => read_key(key),
+            .button(button) => read_button(button),
+            .entered_fullscreen => .some(.turned_fullscreen(true)),
+            .left_fullscreen => .some(.turned_fullscreen(false)),
+            .gamepad_added(_) | .axis(_, _, _) | .other => .none,
+        };
+    }
+
+    static fn read_key(key: Key) -> Option<Request> {
+        return match key {
+            .up | .w => command(.steer(.up)),
+            .down | .s => command(.steer(.down)),
+            .left | .a => command(.steer(.left)),
+            .right | .d => command(.steer(.right)),
+            .space | .enter => command(.confirm),
+            .p => command(.pause),
+            .e => command(.easy),
+            .f => .some(.fullscreen),
+            .escape => command(.back),
+            .other => .none,
+        };
+    }
+
+    static fn read_button(button: Button) -> Option<Request> {
+        return match button {
+            .up => command(.steer(.up)),
+            .down => command(.steer(.down)),
+            .left => command(.steer(.left)),
+            .right => command(.steer(.right)),
+            .south => command(.confirm),
+            .east => command(.back),
+            .start => command(.pause),
+            .other => command(.play),
+        };
+    }
+
+    static fn steer(direction: Option<Direction>) -> Option<Request> {
+        return match direction {
+            .some(direction) => command(.steer(direction)),
+            .none => .none,
+        };
+    }
+
+    static fn command(command: Command) -> Option<Request> {
+        return .some(.command(command));
+    }
+}
+
+impl Enumerable<Request> for Input {
+    pub fn iter() -> Enumerator<Request> {
+        return self;
+    }
+}
+
+impl Enumerator<Request> for Input {
+    pub fn next() -> bool {
+        loop {
+            match self.window.poll() {
+                .none => {
+                    // A stick reports each axis on its own, so it is read once
+                    // every event is in.
+                    self.request = steer(self.stick.turn());
+                    return self.request.is_some();
+                },
+                .some(event) => {
+                    if let .axis(gamepad, axis, value) = event {
+                        self.stick.tilt(gamepad, axis, value);
+                    }
+
+                    self.request = read(event);
+                    if self.request.is_some() {
+                        return true;
+                    }
+                },
+            }
+        }
+    }
+
+    pub fn current() -> Request {
+        return self.request.unwrap();
+    }
+}
+
+type Stick {
+    mut field gamepad: u32;
+    mut field x: i32;
+    mut field y: i32;
+    mut field aim: Option<Direction>;
+
+    pub static fn new() -> Stick {
+        return new Stick { gamepad: 0, x: 0, y: 0, aim: .none };
+    }
+
+    pub fn tilt(gamepad: u32, axis: Axis, value: i32) {
+        if let .other = axis {
+            return;
+        }
+
+        if gamepad != self.gamepad {
+            if self.aim.is_some() {
+                return;
+            }
+
+            self.gamepad = gamepad;
+            self.x = 0;
+            self.y = 0;
+        }
+
+        match axis {
+            .left_x => {
+                self.x = value;
+            },
+            .left_y => {
+                self.y = value;
+            },
+            .other => { },
+        }
+    }
+
+    pub fn turn() -> Option<Direction> {
+        let press = 16000;
+        let release = 10000;
+        let horizontal = Math::Abs(self.x);
+        let vertical = Math::Abs(self.y);
+        let reach = Math::Max(horizontal, vertical);
+        if reach < release {
+            self.aim = .none;
+            return .none;
+        }
+
+        if reach < press {
+            return .none;
+        }
+
+        // Changing axis takes a clear lean, so a stick held near a diagonal
+        // does not zigzag.
+        let mut sideways = horizontal >= vertical;
+        if let .some(current) = self.aim {
+            if current.dx() != 0 {
+                sideways = vertical * 2 < horizontal * 3;
+            } else {
+                sideways = horizontal * 2 > vertical * 3;
+            }
+        }
+
+        let direction = self.pointing(sideways);
+        if let .some(current) = self.aim {
+            if current.same(direction) {
+                return .none;
+            }
+        }
+
+        self.aim = .some(direction);
+        return .some(direction);
+    }
+
+    fn pointing(sideways: bool) -> Direction {
+        if sideways {
+            if self.x < 0 {
+                return .left;
+            }
+
+            return .right;
+        }
+
+        if self.y < 0 {
+            return .up;
+        }
+
+        return .down;
+    }
+}

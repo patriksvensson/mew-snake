@@ -1,7 +1,9 @@
+#load "color.mew"
 #load "geometry.mew"
 
 namespace engine;
 
+use std.collections;
 use system;
 
 [ffi("SDL3")]
@@ -61,6 +63,15 @@ static external fn SDL_CloseGamepad(gamepad: i64) -> void;
 [ffi("SDL3")]
 static external fn SDL_HasGamepad() -> bool;
 
+[ffi("SDL3")]
+static external fn SDL_GetGamepadButtonLabel(gamepad: i64, button: i32) -> i32;
+
+[ffi("SDL3")]
+static external fn SDL_SetGamepadLED(gamepad: i64, red: u8, green: u8, blue: u8) -> bool;
+
+[ffi("SDL3")]
+static external fn SDL_RumbleGamepad(gamepad: i64, low: u16, high: u16, milliseconds: u32) -> bool;
+
 pub union Key {
     up,
     down,
@@ -70,6 +81,7 @@ pub union Key {
     a,
     s,
     d,
+    e,
     f,
     p,
     space,
@@ -89,6 +101,7 @@ impl Key {
             4 => .a,
             22 => .s,
             7 => .d,
+            8 => .e,
             9 => .f,
             19 => .p,
             44 => .space,
@@ -104,6 +117,8 @@ pub union Button {
     down,
     left,
     right,
+    south,
+    east,
     start,
     other,
 }
@@ -111,6 +126,8 @@ pub union Button {
 impl Button {
     pub static fn from_index(index: u8) -> Button {
         return match index {
+            0 => .south,
+            1 => .east,
             6 => .start,
             11 => .up,
             12 => .down,
@@ -228,15 +245,15 @@ pub type Window {
     field pixel_height: i32[];
     pub field size: Size;
     pub field samples: i32;
-    mut field fullscreen: bool;
+    mut field gamepads: List<u32>;
 
-    pub static fn open(title: string, size: Size, samples: i32 = 4) -> Result<Window, string> {
+    pub static fn open(title: string, size: Size, samples: i32 = 4, fullscreen: bool = false) -> Result<Window, string> {
         let video: u32 = 0x20;
         if !SDL_Init(video) {
             return .err("SDL could not start its video subsystem.");
         }
 
-        // The keyboard still works when gamepads are unavailable.
+        // Gamepads are optional, so a failure here is ignored.
         let gamepad: u32 = 0x2000;
         SDL_Init(gamepad);
 
@@ -275,6 +292,13 @@ pub type Window {
         }
 
         SDL_GL_SetSwapInterval(1);
+
+        // Going full screen after the window opens makes SDL report it, as it
+        // does for later changes.
+        if fullscreen {
+            SDL_SetWindowFullscreen(handle, true);
+        }
+
         return .ok(new Window {
             handle: handle,
             context: context,
@@ -283,7 +307,7 @@ pub type Window {
             pixel_height: new i32[1],
             size: size,
             samples: samples,
-            fullscreen: false,
+            gamepads: List<u32>::new(),
         });
     }
 
@@ -292,21 +316,29 @@ pub type Window {
             return .none;
         }
 
-        // SDL only reports buttons and sticks for gamepads that have been opened.
+        // SDL only reports buttons and sticks for gamepads that have been
+        // opened.
         let event = Event::decode(self.event);
         match event {
             .gamepad_added(gamepad) => {
                 SDL_OpenGamepad(gamepad);
+                self.gamepads.add(gamepad);
             },
             .gamepad_removed(gamepad) => {
                 SDL_CloseGamepad(SDL_GetGamepadFromID(gamepad));
+                let remaining = List<u32>::new();
+                for other in self.gamepads {
+                    if other != gamepad {
+                        remaining.add(other);
+                    }
+                }
+
+                self.gamepads = remaining;
             },
             .entered_fullscreen => {
-                self.fullscreen = true;
                 SDL_HideCursor();
             },
             .left_fullscreen => {
-                self.fullscreen = false;
                 SDL_ShowCursor();
             },
             _ => { },
@@ -315,12 +347,36 @@ pub type Window {
         return .some(event);
     }
 
-    pub fn toggle_fullscreen() {
-        SDL_SetWindowFullscreen(self.handle, !self.fullscreen);
+    pub fn set_fullscreen(on: bool) {
+        SDL_SetWindowFullscreen(self.handle, on);
     }
 
     pub fn has_gamepad() -> bool {
         return SDL_HasGamepad();
+    }
+
+    pub fn label(button: i32) -> i32 {
+        if self.gamepads.count() == 0 {
+            return 0;
+        }
+
+        return SDL_GetGamepadButtonLabel(SDL_GetGamepadFromID(self.gamepads.get(0)), button);
+    }
+
+    // Both motors take a strength from nothing to one, the low one heavy and
+    // the high one buzzy.
+    pub fn rumble(low: f32, high: f32, milliseconds: u32) {
+        let full: f32 = 65535.0;
+        for gamepad in self.gamepads {
+            SDL_RumbleGamepad(SDL_GetGamepadFromID(gamepad), (low.clamp_to_unit() * full) as u16, (high.clamp_to_unit() * full) as u16, milliseconds);
+        }
+    }
+
+    // Only gamepads with a light bar, like the DualSense, show the colour.
+    pub fn light(color: Color) {
+        for gamepad in self.gamepads {
+            SDL_SetGamepadLED(SDL_GetGamepadFromID(gamepad), color.r, color.g, color.b);
+        }
     }
 
     pub fn pixels() -> Size {

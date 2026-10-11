@@ -1,0 +1,216 @@
+namespace engine;
+
+use system;
+
+[ffi("SDL3")]
+static external fn SDL_InitSubSystem(flags: u32) -> bool;
+
+[ffi("SDL3")]
+static external fn SDL_OpenAudioDevice(device: u32, spec: i32[]) -> u32;
+
+[ffi("SDL3")]
+static external fn SDL_CloseAudioDevice(device: u32) -> void;
+
+[ffi("SDL3")]
+static external fn SDL_CreateAudioStream(source: i32[], destination: i32[]) -> i64;
+
+[ffi("SDL3")]
+static external fn SDL_DestroyAudioStream(stream: i64) -> void;
+
+[ffi("SDL3")]
+static external fn SDL_BindAudioStream(device: u32, stream: i64) -> bool;
+
+[ffi("SDL3")]
+static external fn SDL_PutAudioStreamData(stream: i64, samples: f32[], length: i32) -> bool;
+
+[ffi("SDL3")]
+static external fn SDL_ClearAudioStream(stream: i64) -> bool;
+
+[ffi("SDL3")]
+static external fn SDL_GetAudioStreamQueued(stream: i64) -> i32;
+
+[ffi("SDL3")]
+static external fn SDL_SetAudioStreamGain(stream: i64, gain: f32) -> bool;
+
+pub union Wave {
+    square,
+    triangle,
+    sine,
+    noise,
+}
+
+pub type Sound {
+    pub field samples: f32[];
+
+    pub static fn rate() -> i32 {
+        return 44100;
+    }
+
+    // Notes are MIDI numbers, with 69 for the A above middle C.
+    pub static fn pitch(note: i32) -> f64 {
+        return 440.0 * Math::Pow(2.0, ((note - 69) as f64) / 12.0);
+    }
+
+    pub static fn rest(milliseconds: f64) -> Sound {
+        return new Sound { samples: new f32[(milliseconds * rate() / 1000.0) as i32] };
+    }
+
+    pub static fn tone(wave: Wave, from: f64, to: f64, milliseconds: f64, volume: f64) -> Sound {
+        let samples = new f32[(milliseconds * rate() / 1000.0) as i32];
+        mix(samples, 0, wave, from, to, milliseconds, volume, new Random { });
+        return new Sound { samples: samples };
+    }
+
+    // Adds one note into a buffer that wraps around, so a tune can play without
+    // a sound of its own for every note. Notes fade out so they never end on a
+    // click.
+    pub static fn mix(buffer: f32[], start: i32, wave: Wave, from: f64, to: f64, milliseconds: f64, volume: f64, random: Random) {
+        let count = (milliseconds * rate() / 1000.0) as i32;
+        let attack = (rate() as f64) * 0.004;
+        let mut phase: f64 = 0.0;
+        let mut held: f64 = 0.0;
+        for at in 0..count {
+            let progress = (at as f64) / count;
+            phase += (from + (to - from) * progress) / rate();
+            if phase >= 1.0 {
+                phase -= Math::Floor(phase);
+                held = random.NextDouble() * 2.0 - 1.0;
+            }
+
+            let value = match wave {
+                .square => Math::Sign(0.5 - phase) as f64,
+                .triangle => 4.0 * Math::Abs(phase - 0.5) - 1.0,
+                .sine => Math::Sin(phase * 6.283185307179586),
+                .noise => held,
+            };
+
+            let rest = 1.0 - progress;
+            let fade = Math::Min(1.0, at / attack) * rest * Math::Sqrt(rest);
+            let place = (start + at) % buffer.count;
+            buffer[place] += (value * volume * fade) as f32;
+        }
+    }
+
+    pub fn then(next: Sound) -> Sound {
+        let samples = new f32[self.samples.count + next.samples.count];
+        for at in 0..self.samples.count {
+            samples[at] = self.samples[at];
+        }
+
+        for at in 0..next.samples.count {
+            samples[self.samples.count + at] = next.samples[at];
+        }
+
+        return new Sound { samples: samples };
+    }
+
+    pub fn add(other: Sound, milliseconds: f64) {
+        let start = (milliseconds * rate() / 1000.0) as i32;
+        for at in 0..other.samples.count {
+            if start + at < self.samples.count {
+                self.samples[start + at] += other.samples[at];
+            }
+        }
+    }
+
+    pub fn with(other: Sound) -> Sound {
+        let samples = new f32[Math::Max(self.samples.count, other.samples.count)];
+        for at in 0..samples.count {
+            if at < self.samples.count {
+                samples[at] += self.samples[at];
+            }
+
+            if at < other.samples.count {
+                samples[at] += other.samples[at];
+            }
+        }
+
+        return new Sound { samples: samples };
+    }
+}
+
+pub type Speaker {
+    field device: u32;
+    field voices: i64[];
+
+    pub static fn open(voices: i32) -> Speaker {
+        let audio: u32 = 0x10;
+        let preferred: u32 = 0xFFFFFFFF;
+        let float32 = 0x8120;
+        let spec = new i32[] { float32, 1, Sound::rate() };
+        let mut device: u32 = 0;
+        if SDL_InitSubSystem(audio) {
+            device = SDL_OpenAudioDevice(preferred, spec);
+        }
+
+        let streams = new i64[voices];
+        if device != 0 {
+            for at in 0..voices {
+                streams[at] = SDL_CreateAudioStream(spec, spec);
+                SDL_BindAudioStream(device, streams[at]);
+            }
+        }
+
+        return new Speaker { device: device, voices: streams };
+    }
+
+    pub fn is_open() -> bool {
+        return self.device != 0;
+    }
+
+    pub fn play(sound: Sound, voice: i32) {
+        let stream = self.voices[voice];
+        if stream != 0 {
+            SDL_ClearAudioStream(stream);
+            SDL_PutAudioStreamData(stream, sound.samples, sound.samples.count * 4);
+        }
+    }
+
+    pub fn stop(voice: i32) {
+        let stream = self.voices[voice];
+        if stream != 0 {
+            SDL_ClearAudioStream(stream);
+        }
+    }
+
+    pub fn queue(sound: Sound, voice: i32) {
+        self.queue_samples(sound.samples, sound.samples.count, voice);
+    }
+
+    // SDL copies what it is given, so the same buffer can be handed over again
+    // and again.
+    pub fn queue_samples(samples: f32[], count: i32, voice: i32) {
+        let stream = self.voices[voice];
+        if stream != 0 {
+            SDL_PutAudioStreamData(stream, samples, count * 4);
+        }
+    }
+
+    pub fn queued(voice: i32) -> f64 {
+        let stream = self.voices[voice];
+        if stream == 0 {
+            return 0.0;
+        }
+
+        return SDL_GetAudioStreamQueued(stream) / 4.0 / Sound::rate() * 1000.0;
+    }
+
+    pub fn volume(voice: i32, gain: f32) {
+        let stream = self.voices[voice];
+        if stream != 0 {
+            SDL_SetAudioStreamGain(stream, gain);
+        }
+    }
+
+    pub fn close() {
+        for stream in self.voices {
+            if stream != 0 {
+                SDL_DestroyAudioStream(stream);
+            }
+        }
+
+        if self.device != 0 {
+            SDL_CloseAudioDevice(self.device);
+        }
+    }
+}

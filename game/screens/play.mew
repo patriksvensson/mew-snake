@@ -1,62 +1,172 @@
 #load "../engine/screens.mew"
-#load "../game.mew"
 #load "../stage.mew"
+#load "../world/game.mew"
+#load "dissolve.mew"
 #load "game_over.mew"
 #load "high_score.mew"
 #load "pause.mew"
+#load "replay.mew"
 
 use engine;
+use system;
 
 pub type PlayScreen {
     field stage: Stage;
     field game: Game;
+    field collapse: Collapse;
+    field recorder: Recorder;
+    mut field finished: bool;
 
     pub static fn new(stage: Stage) -> PlayScreen {
-        return new PlayScreen { stage: stage, game: stage.play() };
+        let game = stage.play();
+        return new PlayScreen { stage: stage, game: game, collapse: Collapse::new(game), recorder: Recorder::new(), finished: false };
     }
+
+    pub static fn start(stage: Stage) -> Transition<Command> {
+        return DissolveScreen::to(stage, PlayScreen::new(stage), .start);
+    }
+
+    fn scores() -> HighScores {
+        return self.stage.scores(self.game.counts_as_easy());
+    }
+
+    fn fall_apart(milliseconds: f64) -> Transition<Command> {
+        if self.finished {
+            return .stay;
+        }
+
+        self.collapse.advance(milliseconds, |piece| self.stage.pop(self.game, piece));
+        if !self.collapse.is_done() {
+            return .stay;
+        }
+
+        self.finished = true;
+        let result = self.result();
+        if !self.game.has_won() && ReplayScreen::is_worth(self.recorder) {
+            return .push(ReplayScreen::new(self.stage, self.recorder, result));
+        }
+
+        return .push(result);
+    }
+
+    fn result() -> Screen<Command> {
+        if self.scores().qualifies(self.game.score()) {
+            return HighScoreScreen::new(self.stage, self.game);
+        }
+
+        return GameOverScreen::new(self.stage, self.game, .none);
+    }
+
 }
 
 impl Screen<Command> for PlayScreen {
+    pub fn enter() {
+        self.stage.sounds.begin_music(self.game.season());
+    }
+
+    // However the game ends, even by quitting, it goes into the stats.
+    pub fn leave() {
+        self.stage.stats.finish(self.game);
+    }
+
     pub fn handle(command: Command) -> Transition<Command> {
+        if self.game.is_over() {
+            return match command {
+                .quit => .quit,
+                _ => .stay,
+            };
+        }
+
         match command {
             .steer(direction) => {
                 self.game.steer(direction);
             },
-            .confirm | .pause | .suspend => {
+            .pause | .back | .suspend => {
                 return .push(PauseScreen::new(self.stage, self.game));
             },
             .quit => {
                 return .quit;
             },
-            .play => { },
+            .confirm | .play | .easy => { },
         }
 
         return .stay;
     }
 
     pub fn update(milliseconds: f64) -> Transition<Command> {
-        // The result is already showing on top, over the game that ended.
-        if self.game.over {
-            return .stay;
+        if self.game.is_over() {
+            self.stage.sounds.stop_music();
+            return self.fall_apart(milliseconds);
         }
 
         self.game.update(milliseconds);
-        self.stage.scene.react(self.game);
-        if !self.game.over {
-            return .stay;
+        self.stage.react(self.game);
+        if !self.game.is_paused() {
+            self.recorder.record(self.game, milliseconds);
         }
 
-        if self.stage.high_scores.qualifies(self.game.state.score) {
-            return .push(HighScoreScreen::new(self.stage, self.game));
-        }
-
-        return .push(GameOverScreen::new(self.stage, self.game, .none));
+        self.stage.sounds.follow(self.game);
+        return .stay;
     }
 
     pub fn draw() {
         let scene = self.stage.scene;
-        scene.draw_game(self.game);
-        scene.draw_score(self.game.state.score);
-        scene.draw_best(self.stage.high_scores.best());
+        scene.draw_game(self.game, gone: self.collapse.gone());
+        scene.draw_hud(self.game, self.scores().best());
+    }
+}
+
+type Collapse {
+    field game: Game;
+    mut field time: f64;
+    mut field gone: i32;
+
+    pub static fn new(game: Game) -> Collapse {
+        return new Collapse { game: game, time: 0.0, gone: 0 };
+    }
+
+    pub fn gone() -> i32 {
+        return self.gone;
+    }
+
+    pub fn advance(milliseconds: f64, burst: fn(i32) -> void) {
+        if !self.game.is_over() {
+            return;
+        }
+
+        self.time += milliseconds;
+        while self.gone < self.pieces() && self.time >= delay() + self.gone * self.gap() {
+            burst(self.gone);
+            self.gone += 1;
+        }
+    }
+
+    pub fn is_done() -> bool {
+        return self.time >= delay() + self.pieces() * self.gap() + linger();
+    }
+
+    // A snake that fills the whole board has won, and stays in one piece.
+    fn pieces() -> i32 {
+        if self.game.has_won() {
+            return 0;
+        }
+
+        return self.game.snake.length;
+    }
+
+    // A long snake comes apart faster, so the bursting never takes much longer
+    // than a short one's.
+    fn gap() -> f64 {
+        let slowest = 70.0;
+        let longest = 900.0;
+        return Math::Min(slowest, longest / Math::Max(1.0, self.pieces()));
+    }
+
+    static fn delay() -> f64 {
+        return 350.0;
+    }
+
+    static fn linger() -> f64 {
+        return 450.0;
     }
 }

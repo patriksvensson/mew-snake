@@ -1,7 +1,11 @@
 #load "../engine/screens.mew"
-#load "../game.mew"
+#load "../scene/celebration.mew"
 #load "../stage.mew"
+#load "../world/game.mew"
+#load "calm.mew"
+#load "dissolve.mew"
 #load "play.mew"
+#load "title.mew"
 
 use engine;
 use system;
@@ -10,10 +14,16 @@ pub type GameOverScreen {
     field stage: Stage;
     field game: Game;
     field rank: Option<i32>;
-    mut field calm: f64;
+    field calm: Calm;
+    field party: Option<Celebration>;
 
     pub static fn new(stage: Stage, game: Game, rank: Option<i32>) -> GameOverScreen {
-        return new GameOverScreen { stage: stage, game: game, rank: rank, calm: 800.0 };
+        let mut party: Option<Celebration> = .none;
+        if let .some(0) = rank {
+            party = .some(Celebration::new(stage.scene));
+        }
+
+        return new GameOverScreen { stage: stage, game: game, rank: rank, calm: Calm::new(), party: party };
     }
 }
 
@@ -22,39 +32,74 @@ impl Screen<Command> for GameOverScreen {
         return true;
     }
 
+    // A score that made the list has had its fanfare already.
+    pub fn enter() {
+        if let .none = self.rank {
+            self.stage.sounds.play(.sigh);
+        }
+
+        if self.party.is_some() {
+            self.stage.sounds.play(.victory);
+        }
+    }
+
+    // The song for a new best stops when the next screen comes, so it does not
+    // play over that one's music.
+    pub fn leave() {
+        self.stage.sounds.stop_song();
+    }
+
     pub fn handle(command: Command) -> Transition<Command> {
         if let .quit = command {
             return .quit;
         }
 
-        // Buttons still being pressed as the game ended should not start the next one.
-        if self.calm > 0.0 {
+        if !self.calm.is_settled() {
             return .stay;
         }
 
         return match command {
-            .confirm | .play => .reset(PlayScreen::new(self.stage)),
-            .steer(_) | .pause | .suspend | .quit => .stay,
+            .confirm | .play | .pause => PlayScreen::start(self.stage),
+            .back => DissolveScreen::to(self.stage, TitleScreen::new(self.stage), .choose),
+            .steer(_) | .suspend | .easy | .quit => .stay,
         };
     }
 
     pub fn update(milliseconds: f64) -> Transition<Command> {
-        self.calm = Math::Max(0.0, self.calm - milliseconds);
+        self.calm.pass(milliseconds);
+        if let .some(party) = self.party {
+            if party.update(milliseconds) {
+                self.stage.sounds.play(.firework);
+            }
+        }
+
         return .stay;
     }
 
     pub fn draw() {
         let scene = self.stage.scene;
         let mut title = "GAME OVER";
-        if self.game.state.won {
+        let mut color = scene.palette.crash;
+        if self.game.has_won() {
             title = "YOU WIN";
         }
 
         let top = scene.viewport.top;
         scene.shade(scene.palette.shade);
-        scene.shadowed_centered(.large, scene.center, top + 30.0, title, scene.palette.crash);
-        scene.shadowed_centered(.medium, scene.center, top + 100.0, $"SCORE {self.game.state.score}", scene.palette.text);
-        scene.draw_table(self.stage.high_scores, top + 150.0, self.rank);
-        scene.shadowed_centered(.small, scene.center, scene.viewport.bottom - 50.0, $"{self.stage.press} TO PLAY AGAIN", scene.palette.accent.fade(scene.blink));
+        if let .some(party) = self.party {
+            party.draw();
+            title = "NEW BEST!";
+            color = scene.palette.accent;
+        }
+
+        scene.shadowed_centered(.large, scene.center, top + 30.0, title, color);
+        scene.shadowed_centered(.medium, scene.center, top + 100.0, $"SCORE {self.game.score()}", scene.palette.text);
+        let easy = self.game.counts_as_easy();
+        if easy {
+            scene.shadowed_centered(.small, scene.center, top + 128.0, "EASY MODE SCORES", scene.palette.leaf);
+        }
+
+        scene.draw_table(self.stage.scores(easy), top + 150.0, self.rank);
+        scene.draw_legend("PLAY AGAIN", "TITLE");
     }
 }

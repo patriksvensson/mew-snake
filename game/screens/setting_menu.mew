@@ -1,0 +1,110 @@
+#load "../stage.mew"
+#load "../world/snake.mew"
+
+use engine;
+
+pub union Setting {
+    skin,
+    trail,
+    easy,
+    fullscreen,
+    crt,
+    music,
+    sounds,
+}
+
+impl Setting {
+    pub static fn all() -> Setting[] {
+        return new Setting[] { .skin, .trail, .easy, .fullscreen, .crt, .music, .sounds };
+    }
+}
+
+pub type SettingMenu {
+    field stage: Stage;
+
+    pub static fn new(stage: Stage) -> SettingMenu {
+        return new SettingMenu { stage: stage };
+    }
+
+    pub fn label(setting: Setting) -> string {
+        let settings = self.stage.settings;
+        return match setting {
+            .skin => "SKIN: ",
+            .trail => $"TRAIL: {settings.trail().name()}",
+            .easy => $"EASY MODE: {on_off(settings.is_easy())}",
+            .fullscreen => $"FULL SCREEN: {on_off(settings.is_fullscreen())}",
+            .crt => $"CRT LOOK: {on_off(settings.is_crt())}",
+            .music => $"MUSIC: {settings.music() * 10}%",
+            .sounds => $"SOUNDS: {settings.sounds() * 10}%",
+        };
+    }
+
+    pub fn draw(setting: Setting, y: f32, picked: bool) {
+        let scene = self.stage.scene;
+        if let .skin = setting {
+            scene.draw_skin_choice(y, self.label(setting), self.stage.settings.skin(), picked);
+        } else {
+            scene.draw_choice(y, self.label(setting), picked);
+        }
+    }
+
+    pub fn change(setting: Setting, step: i32, snake: Snake) {
+        let settings = self.stage.settings;
+        match setting {
+            .skin => {
+                snake.wear(self.stage.change_skin(step));
+            },
+            .trail => {
+                settings.set_trail(settings.trail().next(step));
+                self.stage.sounds.play(.tick);
+            },
+            .easy => {
+                settings.toggle_easy();
+                self.stage.sounds.play(.choose);
+            },
+            .fullscreen => {
+                self.stage.set_fullscreen(!settings.is_fullscreen());
+                self.stage.sounds.play(.choose);
+            },
+            .crt => {
+                settings.toggle_crt();
+                self.stage.sounds.play(.choose);
+            },
+            .music => {
+                settings.set_music(settings.music() + step);
+            },
+            // The tick comes after the change, so it is heard at the new
+            // volume.
+            .sounds => {
+                settings.set_sounds(settings.sounds() + step);
+                self.stage.apply_settings();
+                self.stage.sounds.play(.tick);
+            },
+        }
+
+        self.stage.apply_settings();
+    }
+
+    pub fn pick(setting: Setting, snake: Snake) {
+        let settings = self.stage.settings;
+        match setting {
+            .music => {
+                self.change(setting, (settings.music() + 1) % 11 - settings.music(), snake);
+            },
+            .sounds => {
+                self.change(setting, (settings.sounds() + 1) % 11 - settings.sounds(), snake);
+            },
+            _ => {
+                self.change(setting, 1, snake);
+            },
+        }
+    }
+
+    static fn on_off(on: bool) -> string {
+        if on {
+            return "ON";
+        }
+
+        return "OFF";
+    }
+}

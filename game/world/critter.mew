@@ -1,0 +1,381 @@
+#load "../engine/color.mew"
+#load "../engine/geometry.mew"
+#load "../engine/random.mew"
+#load "../engine/sokol.mew"
+#load "../scene/palette.mew"
+#load "../scene/viewport.mew"
+#load "board.mew"
+
+use engine;
+use system;
+
+pub union Animal {
+    mouse,
+    frog,
+    butterfly,
+}
+
+impl Animal {
+    pub static fn any(random: Random) -> Animal {
+        let roll = random.NextDouble();
+        if roll < 0.45 {
+            return .mouse;
+        }
+
+        if roll < 0.8 {
+            return .frog;
+        }
+
+        return .butterfly;
+    }
+
+    pub fn flies() -> bool {
+        return match self {
+            .butterfly => true,
+            _ => false,
+        };
+    }
+
+    pub fn index() -> i32 {
+        return match self {
+            .mouse => 0,
+            .frog => 1,
+            .butterfly => 2,
+        };
+    }
+
+    pub fn points() -> i32 {
+        return match self {
+            .mouse | .frog => 5,
+            .butterfly => 3,
+        };
+    }
+
+    pub fn call() -> string {
+        return match self {
+            .mouse => "SQUEAK!",
+            .frog => "RIBBIT!",
+            .butterfly => "FLUTTER!",
+        };
+    }
+
+    pub fn color() -> Color {
+        return match self {
+            .mouse => Color::rgb(255, 150, 185),
+            .frog => Color::rgb(120, 215, 95),
+            .butterfly => Color::rgb(255, 170, 70),
+        };
+    }
+
+    pub fn move_time() -> f64 {
+        return match self {
+            .mouse => 110.0,
+            .frog => 260.0,
+            .butterfly => 420.0,
+        };
+    }
+}
+
+pub type Critter {
+    field board: Board;
+    field random: Random;
+    field directions: Direction[];
+    mut field animal: Animal;
+    mut field cell: Cell;
+    mut field from: Cell;
+    mut field heading: Direction;
+    mut field facing: f32;
+    mut field left: f64;
+    mut field wait: f64;
+    mut field moved: f64;
+
+    pub static fn new(board: Board, random: Random) -> Critter {
+        let nowhere = new Cell { x: 0, y: 0 };
+        return new Critter {
+            board: board,
+            random: random,
+            directions: Direction::all(),
+            animal: .mouse,
+            cell: nowhere,
+            from: nowhere,
+            heading: .left,
+            facing: -1.0,
+            left: 0.0,
+            wait: 0.0,
+            moved: 1000.0,
+        };
+    }
+
+    pub fn copy() -> Critter {
+        return new Critter {
+            board: self.board,
+            random: self.random,
+            directions: self.directions,
+            animal: self.animal,
+            cell: self.cell,
+            from: self.from,
+            heading: self.heading,
+            facing: self.facing,
+            left: self.left,
+            wait: self.wait,
+            moved: self.moved,
+        };
+    }
+
+    pub fn animal() -> Animal {
+        return self.animal;
+    }
+
+    pub fn cell() -> Cell {
+        return self.cell;
+    }
+
+    pub fn is_here() -> bool {
+        return self.left > 0.0;
+    }
+
+    // It sits still for a moment first, so there is time to see where it is.
+    pub fn arrive(animal: Animal, cell: Cell, stay: f64) {
+        self.animal = animal;
+        self.cell = cell;
+        self.from = cell;
+        self.left = stay;
+        self.wait = 900.0;
+        self.moved = 1000.0;
+    }
+
+    pub fn leave() {
+        self.left = 0.0;
+    }
+
+    // Returns true when the animal has gone off by itself. It only goes where
+    // it is let in.
+    pub fn update(milliseconds: f64, step_time: f64, snake: Cell, open: fn(Cell) -> bool) -> bool {
+        if !self.is_here() {
+            return false;
+        }
+
+        self.moved += milliseconds;
+        self.left -= milliseconds;
+        if self.left <= 0.0 {
+            self.left = 0.0;
+            return true;
+        }
+
+        self.wait -= milliseconds;
+        if self.wait > 0.0 {
+            return false;
+        }
+
+        match self.animal {
+            .mouse => {
+                self.scurry(step_time, snake, open);
+            },
+            .frog => {
+                self.hop(step_time, snake, open);
+            },
+            .butterfly => {
+                self.flutter(open);
+            },
+        }
+
+        return false;
+    }
+
+    fn scurry(step_time: f64, snake: Cell, open: fn(Cell) -> bool) {
+        if self.cell.distance(snake) <= 6 {
+            self.wait = step_time * 1.5;
+            self.flee(snake, 1, open);
+            return;
+        }
+
+        if self.random.NextDouble() < 0.3 {
+            self.wait = Chance::between(self.random, 400.0, 1100.0);
+            return;
+        }
+
+        self.wait = step_time * 2.0;
+        self.wander(1, open);
+    }
+
+    fn hop(step_time: f64, snake: Cell, open: fn(Cell) -> bool) {
+        if self.cell.distance(snake) <= 6 {
+            self.wait = step_time * 2.6;
+            self.flee(snake, 2, open);
+            return;
+        }
+
+        if self.random.NextDouble() < 0.4 {
+            self.wait = Chance::between(self.random, 600.0, 1300.0);
+            return;
+        }
+
+        self.wait = Chance::between(self.random, 900.0, 1500.0);
+        self.wander(2, open);
+    }
+
+    fn flutter(air: fn(Cell) -> bool) {
+        self.wait = Chance::between(self.random, 500.0, 900.0);
+        self.wander(1, air);
+    }
+
+    fn flee(snake: Cell, reach: i32, open: fn(Cell) -> bool) {
+        let mut best = self.cell;
+        let mut farthest = self.cell.distance(snake);
+        for direction in self.directions {
+            let next = self.away(direction, reach);
+            let distance = next.distance(snake);
+            if self.can_enter(next, open) && (distance > farthest || distance == farthest && self.random.NextDouble() < 0.5) {
+                best = next;
+                farthest = distance;
+            }
+        }
+
+        self.go(best);
+    }
+
+    fn wander(reach: i32, open: fn(Cell) -> bool) {
+        let ahead = self.away(self.heading, reach);
+        if self.can_enter(ahead, open) && self.random.NextDouble() < 0.6 {
+            self.go(ahead);
+            return;
+        }
+
+        let start = self.random.Next(0, self.directions.count);
+        for at in 0..self.directions.count {
+            let next = self.away(self.directions[(start + at) % self.directions.count], reach);
+            if self.can_enter(next, open) {
+                self.go(next);
+                return;
+            }
+        }
+    }
+
+    fn away(direction: Direction, reach: i32) -> Cell {
+        return new Cell { x: self.cell.x + direction.dx() * reach, y: self.cell.y + direction.dy() * reach };
+    }
+
+    fn can_enter(cell: Cell, open: fn(Cell) -> bool) -> bool {
+        return self.board.contains(cell) && open(cell);
+    }
+
+    fn go(cell: Cell) {
+        if cell.same(self.cell) {
+            return;
+        }
+
+        for direction in self.directions {
+            if Math::Sign(cell.x - self.cell.x) == direction.dx() && Math::Sign(cell.y - self.cell.y) == direction.dy() {
+                self.heading = direction;
+            }
+        }
+
+        if self.heading.dx() != 0 {
+            self.facing = self.heading.dx() as f32;
+        }
+
+        self.from = self.cell;
+        self.cell = cell;
+        self.moved = 0.0;
+    }
+
+    pub fn draw(painter: Painter, palette: Palette, viewport: Viewport, clock: f64) {
+        if !self.is_here() || self.left < 2000.0 && Math::Floor(clock / 120.0) % 2.0 == 0.0 {
+            return;
+        }
+
+        let along = Math::Min(1.0, self.moved / self.animal.move_time()) as f32;
+        let center = viewport.center(self.from).lerp(viewport.center(self.cell), along);
+        let size = viewport.cell * 0.4;
+        painter.circle(center, viewport.cell * 0.6, self.animal.color().fade(0.12));
+        match self.animal {
+            .mouse => {
+                self.draw_mouse(painter, palette, center, size, along, clock);
+            },
+            .frog => {
+                self.draw_frog(painter, palette, center, size, along);
+            },
+            .butterfly => {
+                self.draw_butterfly(painter, palette, center, size, clock);
+            },
+        }
+    }
+
+    fn draw_mouse(painter: Painter, palette: Palette, center: Point, size: f32, along: f32, clock: f64) {
+        let running = along < 1.0;
+        let way = self.facing;
+        let fur = Color::rgb(190, 192, 208);
+        let pink = Color::rgb(255, 150, 185);
+        let mut hop: f32 = 0.0;
+        if running {
+            hop = -(Math::Sin(along * 3.14159f32) * size * 0.25) as f32;
+        }
+
+        let body = center.offset(0.0, hop);
+        painter.circle(center.offset(0.0, size * 0.75), size * 0.9, palette.shadow.fade(0.35));
+
+        let swish = (Math::Sin(clock * 0.012) * size * 0.3) as f32;
+        let root = body.offset(-way * size * 0.85, size * 0.3);
+        let bend = root.offset(-way * size * 0.5, -size * 0.1 + swish);
+        let tip = bend.offset(-way * size * 0.45, -size * 0.45 - swish * 0.5);
+        painter.band(root, bend, 1.3, pink, pink);
+        painter.band(bend, tip, 1.1, pink, pink);
+
+        if running {
+            painter.circle(body.offset(way * size * 0.35, size * 0.62), size * 0.14, pink);
+            painter.circle(body.offset(-way * size * 0.35, size * 0.62), size * 0.14, pink);
+        }
+
+        painter.circle(body.offset(-way * size * 0.2, size * 0.1), size * 0.72, fur);
+        painter.circle(body.offset(way * size * 0.45, -size * 0.05), size * 0.5, fur);
+        painter.circle(body.offset(way * size * 0.2, -size * 0.55), size * 0.32, fur);
+        painter.circle(body.offset(way * size * 0.2, -size * 0.55), size * 0.18, pink);
+        painter.circle(body.offset(way * size * 0.62, -size * 0.15), size * 0.1, palette.pupil);
+        painter.circle(body.offset(way * size * 0.95, size * 0.02), size * 0.12, pink);
+    }
+
+    fn draw_frog(painter: Painter, palette: Palette, center: Point, size: f32, along: f32) {
+        let green = Color::rgb(105, 200, 85);
+        let dark = Color::rgb(60, 140, 55);
+        let belly = Color::rgb(200, 235, 150);
+        let leaping = along < 1.0;
+        let lift = (Math::Sin(along * 3.14159f32) * size * 1.4) as f32;
+        let body = center.offset(0.0, -lift);
+        painter.circle(center.offset(0.0, size * 0.7), size * (0.9 - lift / size * 0.25f32), palette.shadow.fade(0.35));
+
+        let mut stretch: f32 = 0.0;
+        if leaping {
+            stretch = size * 0.5;
+        }
+
+        painter.circle(body.offset(-size * 0.62, size * 0.45 + stretch), size * 0.3, dark);
+        painter.circle(body.offset(size * 0.62, size * 0.45 + stretch), size * 0.3, dark);
+        painter.circle(body.offset(0.0, size * 0.1), size * 0.75, green);
+        painter.circle(body.offset(0.0, size * 0.3), size * 0.45, belly);
+        for way in new f32[] { -1.0, 1.0 } {
+            let eye = body.offset(way * size * 0.38, -size * 0.55);
+            painter.circle(eye, size * 0.28, green);
+            painter.circle(eye, size * 0.19, palette.eye);
+            painter.circle(eye.offset(self.facing * size * 0.05, 0.0), size * 0.1, palette.pupil);
+        }
+
+        painter.band(body.offset(-size * 0.3, -size * 0.05), body.offset(size * 0.3, -size * 0.05), 0.9, dark, dark);
+    }
+
+    fn draw_butterfly(painter: Painter, palette: Palette, center: Point, size: f32, clock: f64) {
+        let wing = Color::rgb(255, 165, 60);
+        let spot = Color::rgb(255, 230, 120);
+        let bob = (Math::Sin(clock * 0.006) * size * 0.2) as f32;
+        let body = center.offset(0.0, bob - size * 0.3);
+        let open = (0.35 + Math::Abs(Math::Sin(clock * 0.018)) * 0.65) as f32;
+        painter.circle(center.offset(0.0, size * 0.75), size * 0.6, palette.shadow.fade(0.25));
+        for way in new f32[] { -1.0, 1.0 } {
+            painter.circle(body.offset(way * size * 0.5 * open, -size * 0.2), size * 0.5 * (0.5 + open * 0.5f32), wing);
+            painter.circle(body.offset(way * size * 0.42 * open, size * 0.35), size * 0.34 * (0.5 + open * 0.5f32), wing.mix(palette.cherry, 0.3));
+            painter.circle(body.offset(way * size * 0.55 * open, -size * 0.25), size * 0.16 * open, spot);
+            painter.band(body.offset(0.0, -size * 0.45), body.offset(way * size * 0.3, -size * 0.85), 0.7, palette.pupil, palette.pupil);
+        }
+
+        painter.band(body.offset(0.0, -size * 0.45), body.offset(0.0, size * 0.5), 1.6, palette.pupil, palette.pupil);
+    }
+}
