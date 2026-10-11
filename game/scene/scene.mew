@@ -73,7 +73,7 @@ pub type Scene {
             light: LightBar::new(input, palette),
             sparks: Sparks::new(512),
             trails: Trails::new(96),
-            weather: Weather::new(viewport, 40),
+            weather: Weather::new(viewport, 46),
             shower: Shower::new(viewport),
             speech: Speech::new(),
             ripples: Ring<Ripple>::new(4),

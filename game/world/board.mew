@@ -60,7 +60,7 @@ pub type Cell {
 }
 
 pub type Board {
-    pub field columns: i32 = 24;
+    pub field columns: i32 = 28;
     pub field rows: i32 = 18;
 
     pub fn count() -> i32 {
