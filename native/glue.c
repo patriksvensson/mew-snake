@@ -6,6 +6,7 @@
 
 #define GLUE_TEXT_SIZES 3
 #define GLUE_LAYERS 2
+#define GLUE_CRT_LINES 200
 
 static int glue_samples;
 static int glue_current_layer;
@@ -20,6 +21,7 @@ static float glue_background[3];
 // all, so the old television fills the screen in one piece.
 static bool glue_crt_on;
 static int glue_crt_width, glue_crt_height;
+static float glue_crt_line, glue_crt_top;
 static sg_image glue_crt_color, glue_crt_resolve, glue_crt_depth;
 static sg_view glue_crt_color_view, glue_crt_resolve_view, glue_crt_depth_view, glue_crt_texture;
 static sg_sampler glue_crt_sampler;
@@ -61,10 +63,13 @@ static const char* glue_crt_fragment =
     "        + texture(screen, at + pixel * vec2(0.0, 3.0)).rgb\n"
     "        + texture(screen, at - pixel * vec2(0.0, 3.0)).rgb;\n"
     "    color += glow * 0.07;\n"
-    "    float scanline = 0.86 + 0.14 * sin(at.y * crt.y * 3.14159 / 1.5);\n"
+    "    float row = fract((at.y * crt.y - crt.w) / crt.z);\n"
+    "    float beam = sqrt(0.5 - 0.5 * cos(row * 6.28318));\n"
+    "    float luma = clamp(dot(color, vec3(0.3, 0.59, 0.11)), 0.0, 1.0);\n"
+    "    float scanline = 1.0 - (0.65 - 0.3 * luma) * (1.0 - beam);\n"
     "    float edge = 16.0 * at.x * at.y * (1.0 - at.x) * (1.0 - at.y);\n"
     "    float vignette = pow(edge, 0.22);\n"
-    "    frag_color = vec4(color * scanline * vignette * 1.08, 1.0);\n"
+    "    frag_color = vec4(color * scanline * vignette * 1.22, 1.0);\n"
     "}\n";
 
 static sg_swapchain glue_swapchain(void) {
@@ -218,6 +223,8 @@ void glue_begin(int width, int height, int x, int y, int area_width, int area_he
 
     if (glue_crt_on) {
         glue_crt_resize(width, height);
+        glue_crt_line = area_height / (float)GLUE_CRT_LINES;
+        glue_crt_top = (float)y;
         sg_begin_pass(&(sg_pass){
             .action = glue_clear(),
             .attachments = {
@@ -271,7 +278,7 @@ void glue_end(void) {
             .views[0] = glue_crt_texture,
             .samplers[0] = glue_crt_sampler,
         });
-        float size[4] = { (float)glue_width, (float)glue_height, 0.0f, 0.0f };
+        float size[4] = { (float)glue_width, (float)glue_height, glue_crt_line, glue_crt_top };
         sg_apply_uniforms(0, &SG_RANGE(size));
         sg_draw(0, 3, 1);
         sg_end_pass();
