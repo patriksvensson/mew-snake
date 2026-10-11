@@ -13,6 +13,9 @@ static external fn SDL_Init(flags: u32) -> bool;
 static external fn SDL_Quit() -> void;
 
 [ffi("SDL3")]
+static external fn SDL_SetHint(name: string, value: string) -> bool;
+
+[ffi("SDL3")]
 static external fn SDL_GL_SetAttribute(attribute: i32, value: i32) -> bool;
 
 [ffi("SDL3")]
@@ -35,6 +38,9 @@ static external fn SDL_GL_SwapWindow(window: i64) -> bool;
 
 [ffi("SDL3")]
 static external fn SDL_SetWindowFullscreen(window: i64, fullscreen: bool) -> bool;
+
+[ffi("SDL3")]
+static external fn SDL_RaiseWindow(window: i64) -> bool;
 
 [ffi("SDL3")]
 static external fn SDL_ShowCursor() -> bool;
@@ -248,6 +254,9 @@ pub type Window {
     mut field gamepads: List<u32>;
 
     pub static fn open(title: string, size: Size, samples: i32 = 4, fullscreen: bool = false) -> Result<Window, string> {
+        // On macOS, full screen without a space of its own goes in at once, so
+        // the picture is never stretched on the way.
+        SDL_SetHint("SDL_VIDEO_MAC_FULLSCREEN_SPACES", "0");
         let video: u32 = 0x20;
         if !SDL_Init(video) {
             return .err("SDL could not start its video subsystem.");
@@ -294,8 +303,10 @@ pub type Window {
         SDL_GL_SetSwapInterval(1);
 
         // Going full screen after the window opens makes SDL report it, as it
-        // does for later changes.
+        // does for later changes. On macOS the window can lose its focus on the
+        // way into its own space, so it is raised before and after.
         if fullscreen {
+            SDL_RaiseWindow(handle);
             SDL_SetWindowFullscreen(handle, true);
         }
 
@@ -337,6 +348,7 @@ pub type Window {
             },
             .entered_fullscreen => {
                 SDL_HideCursor();
+                SDL_RaiseWindow(self.handle);
             },
             .left_fullscreen => {
                 SDL_ShowCursor();
