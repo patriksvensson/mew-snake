@@ -1,5 +1,4 @@
-#load "../world/board.mew"
-
+use engine;
 use system;
 
 pub type Initials {

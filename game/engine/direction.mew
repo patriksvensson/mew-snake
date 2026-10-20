@@ -1,0 +1,42 @@
+namespace engine;
+
+pub union Direction {
+    up,
+    down,
+    left,
+    right,
+}
+
+impl Direction {
+    pub static fn all() -> Direction[] {
+        return new Direction[] { .up, .down, .left, .right };
+    }
+
+    pub fn dx() -> i32 {
+        return match self {
+            .left => -1,
+            .right => 1,
+            _ => 0,
+        };
+    }
+
+    pub fn dy() -> i32 {
+        return match self {
+            .up => -1,
+            .down => 1,
+            _ => 0,
+        };
+    }
+
+    pub fn same(other: Direction) -> bool {
+        return self.dx() == other.dx() && self.dy() == other.dy();
+    }
+
+    pub fn reverses(other: Direction) -> bool {
+        return self.dx() == -other.dx() && self.dy() == -other.dy();
+    }
+
+    pub fn is_turn_from(heading: Direction) -> bool {
+        return !self.same(heading) && !self.reverses(heading);
+    }
+}

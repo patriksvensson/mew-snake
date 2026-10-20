@@ -1,4 +1,3 @@
-#load "../engine/geometry.mew"
 #load "../world/board.mew"
 
 use engine;

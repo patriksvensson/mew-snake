@@ -1,6 +1,3 @@
-#load "../engine/color.mew"
-#load "../engine/geometry.mew"
-#load "../engine/sokol.mew"
 #load "../scene/palette.mew"
 
 use engine;

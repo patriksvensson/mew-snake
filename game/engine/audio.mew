@@ -57,7 +57,7 @@ pub type Sound {
 
     pub static fn tone(wave: Wave, from: f64, to: f64, milliseconds: f64, volume: f64) -> Sound {
         let samples = new f32[(milliseconds * rate() / 1000.0) as i32];
-        mix(samples, 0, wave, from, to, milliseconds, volume, new Random { });
+        mix(samples, 0, wave, from, to, milliseconds, volume, Random::new());
         return new Sound { samples: samples };
     }
 

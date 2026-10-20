@@ -1,10 +1,5 @@
 #load "../controls/input.mew"
 #load "../controls/light_bar.mew"
-#load "../engine/color.mew"
-#load "../engine/effects.mew"
-#load "../engine/geometry.mew"
-#load "../engine/ring.mew"
-#load "../engine/sokol.mew"
 #load "../saves/high_scores.mew"
 #load "../world/game.mew"
 #load "../world/season.mew"
@@ -25,19 +20,11 @@ type Ripple {
     pub field time: f64;
 }
 
-[struct]
-type Popup {
-    pub field at: Point;
-    pub field time: f64;
-    pub field text: string;
-    pub field color: Color;
-    pub field life: f64 = 900.0;
-}
-
 pub type Scene {
     pub field painter: Painter;
     pub field viewport: Viewport;
     pub field palette: Palette;
+    pub field ui: Ui;
     field input: Input;
     field light: LightBar;
     field sparks: Sparks;
@@ -46,7 +33,7 @@ pub type Scene {
     field shower: Shower;
     field speech: Speech;
     field ripples: Ring<Ripple>;
-    field popups: Ring<Popup>;
+    field popups: Popups;
     field combos: Color[];
     mut field clock: f64;
     mut field shake: f32;
@@ -59,16 +46,13 @@ pub type Scene {
         get { return self.viewport.top + self.viewport.grid_height / 2; }
     }
 
-    pub field pulse: f32 {
-        get { return (0.6 + Math::Sin(self.clock * 0.006) * 0.4) as f32; }
-    }
-
     pub static fn new(painter: Painter, viewport: Viewport, input: Input) -> Scene {
         let palette = Palette::new();
         return new Scene {
             painter: painter,
             viewport: viewport,
             palette: palette,
+            ui: Ui::new(painter, palette.shadow),
             input: input,
             light: LightBar::new(input, palette),
             sparks: Sparks::new(512),
@@ -77,7 +61,7 @@ pub type Scene {
             shower: Shower::new(viewport),
             speech: Speech::new(),
             ripples: Ring<Ripple>::new(4),
-            popups: Ring<Popup>::new(8),
+            popups: Popups::new(8),
             combos: new Color[] { palette.accent, palette.orange, palette.food, palette.grape },
             clock: 0.0,
             shake: 0.0,
@@ -88,6 +72,8 @@ pub type Scene {
     // paused.
     pub fn begin(milliseconds: f64) {
         self.clock += milliseconds;
+        self.ui.update(milliseconds);
+        self.popups.update(milliseconds);
         self.shake = Math::Max(0.0, self.shake - milliseconds / 450.0) as f32;
         self.sparks.update(milliseconds);
         self.trails.update(milliseconds);
@@ -143,7 +129,7 @@ pub type Scene {
                         self.sparks.burst(at, color, count: 24, speed: 320.0);
                     }
 
-                    self.popup(at, "FRUIT FRENZY!", self.palette.accent, life: 1600.0);
+                    self.popups.add(at, "FRUIT FRENZY!", self.palette.accent, life: 1600.0);
                 },
                 .vanished(cell) => {
                     self.sparks.burst(self.viewport.center(cell), self.palette.dim, count: 10, speed: 70.0);
@@ -155,7 +141,7 @@ pub type Scene {
                 .powered(cell, power) => {
                     let center = self.viewport.center(cell);
                     self.sparks.burst(center, power.color(), count: 32, speed: 200.0);
-                    self.popup(center, $"{power.name()}!", power.color());
+                    self.popups.add(center, $"{power.name()}!", power.color());
                 },
                 .faded(cell) => {
                     self.sparks.burst(self.viewport.center(cell), self.palette.gold, count: 18, speed: 90.0);
@@ -163,21 +149,21 @@ pub type Scene {
                 .appeared(cell, animal) => {
                     let center = self.viewport.center(cell);
                     self.sparks.burst(center, animal.color(), count: 16, speed: 90.0);
-                    self.popup(center, animal.call(), animal.color());
+                    self.popups.add(center, animal.call(), animal.color());
                 },
                 .caught(cell, animal, points) => {
                     let center = self.viewport.center(cell);
                     self.sparks.burst(center, animal.color(), count: 40, speed: 220.0);
                     self.sparks.burst(center, self.palette.eye, count: 20, speed: 150.0);
                     self.ripples.keep(new Ripple { at: center, time: self.clock });
-                    self.popup(center, $"+{points}", self.palette.accent);
-                    self.popup(center.offset(0.0, -28.0), "GOT IT!", animal.color());
+                    self.popups.add(center, $"+{points}", self.palette.accent);
+                    self.popups.add(center.offset(0.0, -28.0), "GOT IT!", animal.color());
                 },
                 .escaped(cell) => {
                     self.sparks.burst(self.viewport.center(cell), self.palette.dim, count: 12, speed: 70.0);
                 },
                 .season_turned(season) => {
-                    self.popup(new Point { x: self.center, y: self.viewport.top + 70.0 }, season.name(), season.tint());
+                    self.popups.add(new Point { x: self.center, y: self.viewport.top + 70.0 }, season.name(), season.tint());
                 },
                 .crashed(cell) => {
                     self.sparks.burst(self.viewport.center(cell), self.palette.crash, count: 40, speed: 260.0);
@@ -235,7 +221,7 @@ pub type Scene {
 
         // A score that floats over a menu would only get in the way.
         if !game.is_over() && !game.is_paused() {
-            self.draw_popups();
+            self.popups.draw(self.ui, self.viewport.margin, self.viewport.margin + self.viewport.grid_width);
         }
 
         if !game.demo && !game.is_paused() {
@@ -249,58 +235,33 @@ pub type Scene {
         self.draw_best(best, game.is_easy());
     }
 
+    // The legend sits in the lower right corner of the board.
     pub fn draw_legend(accept: string, back: string) {
-        let mut column: f32 = 0.0;
-        let mut words: f32 = 0.0;
-        if !accept.is_empty() {
-            column = self.input.button(.accept).width(self.painter, .small);
-            words = self.painter.measure(.small, accept);
-        }
-
-        if !back.is_empty() {
-            column = Math::Max(column, self.input.button(.back).width(self.painter, .small));
-            words = Math::Max(words, self.painter.measure(.small, back));
-        }
-
-        let left = self.viewport.margin + self.viewport.grid_width - 18.0 - column - hint_gap() - words;
-        let mut y = self.viewport.bottom - 34.0;
-        if !back.is_empty() {
-            self.draw_hint(.back, back, left, y, column);
-            y -= 32.0;
-        }
-
-        if !accept.is_empty() {
-            self.draw_hint(.accept, accept, left, y, column);
-        }
+        let viewport = self.viewport;
+        self.ui.draw_legend(viewport.margin + viewport.grid_width - 18.0, viewport.bottom - 34.0, self.input.button(.accept), accept, self.input.button(.back), back, self.palette.text);
     }
 
-    pub fn draw_hint(prompt: Prompt, words: string, x: f32, y: f32, column: f32 = 0.0) {
-        let button = self.input.button(prompt);
-        button.draw(self.painter, self.palette, x, y, .small, 1.0);
-        self.shadowed(.small, x + Math::Max(column, button.width(self.painter, .small)) + hint_gap(), y, words, self.palette.text);
+    pub fn draw_hint(prompt: Prompt, words: string, x: f32, y: f32) {
+        self.ui.draw_hint(self.input.button(prompt), words, x, y, self.palette.text);
     }
 
     pub fn hint_width(prompt: Prompt, words: string) -> f32 {
-        return self.input.button(prompt).width(self.painter, .small) + hint_gap() + self.painter.measure(.small, words);
-    }
-
-    static fn hint_gap() -> f32 {
-        return 10.0;
+        return self.ui.hint_width(self.input.button(prompt), words);
     }
 
     pub fn draw_score(game: Game) {
         let text = $"SCORE {game.score()}";
-        self.shadowed(.medium, self.viewport.margin, 24.0, text, self.palette.text);
+        self.ui.shadowed(.medium, self.viewport.margin, 24.0, text, self.palette.text);
         if game.combo() > 1 {
             let x = self.viewport.margin + self.painter.measure(.medium, $"{text} ");
-            self.shadowed(.medium, x, 24.0, $"X{game.combo()}", self.combo_color(game.combo()).fade(0.3 + game.combo_left() * 0.7));
+            self.ui.shadowed(.medium, x, 24.0, $"X{game.combo()}", self.combo_color(game.combo()).fade(0.3 + game.combo_left() * 0.7));
         }
     }
 
     pub fn draw_best(best: i32, easy: bool) {
         let text = $"BEST {best}";
         let left = self.viewport.width - self.viewport.margin - self.painter.measure(.medium, text);
-        self.shadowed(.medium, left, 24.0, text, self.palette.dim);
+        self.ui.shadowed(.medium, left, 24.0, text, self.palette.dim);
         if easy {
             self.draw_easy(left - self.painter.measure(.medium, "EASY  "));
         }
@@ -333,13 +294,13 @@ pub type Scene {
         let gap = "  ";
         let mut x = self.center - self.painter.measure(.small, string::join(gap, texts)) / 2;
         for at in 0..texts.count() {
-            self.shadowed(.small, x, 56.0, texts.get(at), colors.get(at));
+            self.ui.shadowed(.small, x, 56.0, texts.get(at), colors.get(at));
             x += self.painter.measure(.small, texts.get(at) + gap);
         }
     }
 
     fn draw_easy(x: f32) {
-        self.shadowed(.medium, x, 24.0, "EASY", self.palette.leaf);
+        self.ui.shadowed(.medium, x, 24.0, "EASY", self.palette.leaf);
     }
 
     pub fn draw_table(scores: HighScores, top: f32, highlight: Option<i32>) {
@@ -361,7 +322,7 @@ pub type Scene {
                 }
             }
 
-            self.shadowed_centered(.small, self.center, top + at * 24, $"{rank.pad_left(3)}  {initials}  {points.pad_left(4)}", color);
+            self.ui.shadowed_centered(.small, self.center, top + at * 24, $"{rank.pad_left(3)}  {initials}  {points.pad_left(4)}", color);
         }
     }
 
@@ -370,54 +331,29 @@ pub type Scene {
         self.painter.rect(viewport.margin, viewport.top, viewport.grid_width, viewport.grid_height, color);
     }
 
-    pub fn shadowed(size: TextSize, x: f32, y: f32, text: string, color: Color) {
-        let offset = size.scale();
-        self.painter.write(size, x + offset, y + offset, text, self.palette.shadow.fade(color.a.to_unit()));
-        self.painter.write(size, x, y, text, color);
-    }
-
-    pub fn shadowed_centered(size: TextSize, center: f32, y: f32, text: string, color: Color) {
-        self.shadowed(size, center - self.painter.measure(size, text) / 2, y, text, color);
-    }
-
-    pub fn shadowed_wave(size: TextSize, center: f32, y: f32, text: string, color: Color, offset: i32 = 0) {
-        let letters = text.chars();
-        let width = 8 * size.scale();
-        let left = center - self.painter.measure(size, text) / 2;
-        for at in 0..letters.count {
-            let lift = (Math::Sin(self.clock * 0.004 - (at + offset) * 0.7f32) * size.scale() * 1.2) as f32;
-            self.shadowed(size, left + at * width, y + lift, $"{letters[at]}", color);
-        }
-    }
-
     pub fn draw_choice(y: f32, label: string, picked: bool) {
-        self.shadowed_centered(.medium, self.center, y, label, self.choice_color(y, label, picked));
+        self.ui.draw_choice(self.center, y, label, picked, self.palette.dim, self.palette.accent);
     }
 
+    // A choice of skin, with the skin's name in its own colours.
     pub fn draw_skin_choice(y: f32, label: string, skin: Skin, picked: bool) {
-        let left = self.center - self.painter.measure(.medium, label + skin.name()) / 2;
-        self.shadowed(.medium, left, y, label, self.choice_color(y, label + skin.name(), picked));
-        self.shadowed_skin(.medium, left + self.painter.measure(.medium, label), y, skin);
-    }
-
-    fn choice_color(y: f32, text: string, picked: bool) -> Color {
-        if !picked {
-            return self.palette.dim;
+        let width = self.painter.measure(.medium, label + skin.name());
+        let left = self.center - width / 2;
+        let mut color = self.palette.dim;
+        if picked {
+            self.ui.draw_arrows(self.center, y, width, self.palette.accent.fade(self.ui.pulse));
+            color = self.palette.accent;
         }
 
-        let reach = self.painter.measure(.medium, text) / 2 + 22.0;
-        let arrow = self.palette.accent.fade(self.pulse);
-        let middle = y + 11.0;
-        self.painter.triangle(new Point { x: self.center - reach, y: middle - 9.0 }, new Point { x: self.center - reach + 12.0, y: middle }, new Point { x: self.center - reach, y: middle + 9.0 }, arrow);
-        self.painter.triangle(new Point { x: self.center + reach, y: middle - 9.0 }, new Point { x: self.center + reach, y: middle + 9.0 }, new Point { x: self.center + reach - 12.0, y: middle }, arrow);
-        return self.palette.accent;
+        self.ui.shadowed(.medium, left, y, label, color);
+        self.shadowed_skin(.medium, left + self.painter.measure(.medium, label), y, skin);
     }
 
     pub fn shadowed_skin(size: TextSize, left: f32, y: f32, skin: Skin) {
         let letters = skin.name().chars();
         let width = 8 * size.scale();
         for at in 0..letters.count {
-            self.shadowed(size, left + at * width, y, $"{letters[at]}", skin.color(self.palette, at, letters.count, self.clock));
+            self.ui.shadowed(size, left + at * width, y, $"{letters[at]}", skin.color(self.palette, at, letters.count, self.clock));
         }
     }
 
@@ -454,27 +390,6 @@ pub type Scene {
         }
     }
 
-    fn draw_popups() {
-        // Popups last for different lengths of time, so one that has run out
-        // may still be waiting behind a longer one.
-        while !self.popups.is_empty() && self.clock - self.popups.first().time > self.popups.first().life {
-            self.popups.pop_front();
-        }
-
-        for index in 0..self.popups.count() {
-            let popup = self.popups.get(index);
-            let age = ((self.clock - popup.time) / popup.life) as f32;
-            if age > 1.0 {
-                continue;
-            }
-
-            let rise = 44.0 * (1.0 - (1.0 - age) * (1.0 - age));
-            let reach = self.painter.measure(.medium, popup.text) / 2;
-            let x = Math::Clamp(popup.at.x, self.viewport.margin + reach, self.viewport.margin + self.viewport.grid_width - reach);
-            self.shadowed_centered(.medium, x, popup.at.y - 34.0 - rise, popup.text, popup.color.fade(1.0 - age * age));
-        }
-    }
-
     fn follow_trail(game: Game) {
         if game.is_over() || game.is_paused() {
             return;
@@ -505,10 +420,6 @@ pub type Scene {
         }
     }
 
-    fn popup(at: Point, text: string, color: Color, life: f64 = 900.0) {
-        self.popups.keep(new Popup { at: at, time: self.clock, text: text, color: color, life: life });
-    }
-
     pub fn draw_snooze(at: Point) {
         Speech::draw_snooze(self.painter, self.palette, at, self.clock);
     }
@@ -523,9 +434,9 @@ pub type Scene {
             color = self.palette.gold;
         }
 
-        self.popup(center, $"+{bite.points}", color);
+        self.popups.add(center, $"+{bite.points}", color);
         if bite.combo > 1 {
-            self.popup(center.offset(0.0, -28.0), $"X{bite.combo}!", self.combo_color(bite.combo));
+            self.popups.add(center.offset(0.0, -28.0), $"X{bite.combo}!", self.combo_color(bite.combo));
         }
     }
 

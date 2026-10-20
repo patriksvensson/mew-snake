@@ -1,5 +1,3 @@
-#load "../engine/geometry.mew"
-#load "../engine/screens.mew"
 #load "../stage.mew"
 #load "../world/game.mew"
 #load "calm.mew"
@@ -35,13 +33,13 @@ pub type HighScoreScreen {
             let x = scene.center + (at * 2 - initials.count + 1) * spacing / 2;
             let mut color = scene.palette.text;
             if at == initials.cursor {
-                let arrow = scene.palette.accent.fade(scene.pulse);
+                let arrow = scene.palette.accent.fade(scene.ui.pulse);
                 scene.painter.triangle(new Point { x: x, y: top - 26.0 }, new Point { x: x + 14.0, y: top - 12.0 }, new Point { x: x - 14.0, y: top - 12.0 }, arrow);
                 scene.painter.triangle(new Point { x: x - 14.0, y: top + 72.0 }, new Point { x: x + 14.0, y: top + 72.0 }, new Point { x: x, y: top + 86.0 }, arrow);
                 color = scene.palette.accent;
             }
 
-            scene.shadowed_centered(.large, x, top, initials.letter(at), color);
+            scene.ui.shadowed_centered(.large, x, top, initials.letter(at), color);
             scene.painter.rect(x - 28.0, top + 58.0, 56.0, 4.0, color);
         }
     }
@@ -116,9 +114,9 @@ impl Screen<Command> for HighScoreScreen {
 
         let top = scene.viewport.top;
         scene.shade(scene.palette.deep_shade);
-        scene.shadowed_centered(.large, scene.center, top + 30.0, title, scene.palette.accent);
-        scene.shadowed_centered(.medium, scene.center, top + 100.0, $"SCORE {score}", scene.palette.text);
-        scene.shadowed_centered(.small, scene.center, top + 150.0, "ENTER YOUR INITIALS", scene.palette.dim);
+        scene.ui.shadowed_centered(.large, scene.center, top + 30.0, title, scene.palette.accent);
+        scene.ui.shadowed_centered(.medium, scene.center, top + 100.0, $"SCORE {score}", scene.palette.text);
+        scene.ui.shadowed_centered(.small, scene.center, top + 150.0, "ENTER YOUR INITIALS", scene.palette.dim);
         self.draw_initials(scene.middle - 10.0);
         scene.draw_legend(next, back);
     }

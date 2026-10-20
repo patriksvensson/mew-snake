@@ -1,0 +1,74 @@
+#load "clang.mew"
+#load "files.mew"
+
+namespace engine.build;
+
+use std.build;
+use std.collections;
+use std.io;
+use std.process;
+
+pub interface Engine {
+    fn folder() -> string;
+    fn program() -> string;
+    fn optimize() -> bool;
+}
+
+[retries(2)]
+task sokol(ctx: Engine)
+    out gfx = file($"{ctx.folder()}/.deps/sokol/sokol_gfx.h")
+    out log = file($"{ctx.folder()}/.deps/sokol/sokol_log.h")
+    out gl = file($"{ctx.folder()}/.deps/sokol/util/sokol_gl.h")
+    out text = file($"{ctx.folder()}/.deps/sokol/util/sokol_debugtext.h")
+{
+    let commit = "401f21f8b7039258c35fef75c11d9a8a0e616771";
+    let deps = $"{ctx.folder()}/.deps/sokol";
+    git("init", "--quiet", deps)?;
+    git("-C", deps, "fetch", "--quiet", "--depth", "1", "https://github.com/floooh/sokol", commit)?;
+    git("-C", deps, "checkout", "--quiet", "--force", "FETCH_HEAD")?;
+}
+
+task optimization(ctx: Engine) -> string {
+    if ctx.optimize() {
+        return "-O2";
+    }
+
+    return "-O0";
+}
+
+rule compile(ctx: Engine, source: File in glob($"{ctx.folder()}/native/*.c")) : sokol, optimization
+    out object = file($"{ctx.folder()}/.build/native/{source.stem}.o")
+    out dependencies = file($"{ctx.folder()}/.build/native/{source.stem}.d")
+{
+    shell(
+        "clang", "-c", optimization, "-g", "-fPIC", "-std=c11",
+        "-DSOKOL_GLCORE", $"-I{ctx.folder()}/.deps/sokol",
+        "-MMD", "-MF", dependencies.path,
+        "-o", object.path, source.path)?;
+    discovered(read_headers(dependencies)?);
+}
+
+task library(ctx: Engine) : compile
+    out dylib = file($"{ctx.folder()}/.build/native/libsokol.dylib")
+{
+    let arguments = List<string>::new();
+    arguments.add("-dynamiclib");
+    arguments.add("-o");
+    arguments.add(dylib.path);
+    for unit in compile {
+        arguments.add(unit.object.path);
+    }
+
+    arguments.add("-framework");
+    arguments.add("OpenGL");
+    shell("clang", arguments.to_array())?;
+}
+
+pub task native(ctx: Engine) : library
+    in sdl = file(env("SDL3").value.unwrap_or("/opt/homebrew/lib/libSDL3.dylib"))
+    out sokol_library = file($"{ctx.program()}/libsokol.dylib")
+    out sdl_library = file($"{ctx.program()}/libSDL3.dylib")
+{
+    library.dylib.copy_to(sokol_library);
+    sdl.copy_to(sdl_library);
+}

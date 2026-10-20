@@ -1,0 +1,112 @@
+#load "button_label.mew"
+#load "color.mew"
+#load "geometry.mew"
+#load "sokol.mew"
+
+namespace engine;
+
+use system;
+
+// Text with a drop shadow, menu choices with arrows by the picked one, and
+// buttons with what they do.
+pub type Ui {
+    pub field painter: Painter;
+    field shadow: Color;
+    mut field clock: f64;
+
+    // Prompts glow brighter and dimmer, between a fifth of the way and fully on.
+    pub field pulse: f32 {
+        get { return (0.6 + Math::Sin(self.clock * 0.006) * 0.4) as f32; }
+    }
+
+    pub static fn new(painter: Painter, shadow: Color) -> Ui {
+        return new Ui { painter: painter, shadow: shadow, clock: 0.0 };
+    }
+
+    pub fn update(milliseconds: f64) {
+        self.clock += milliseconds;
+    }
+
+    pub fn shadowed(size: TextSize, x: f32, y: f32, text: string, color: Color) {
+        let offset = size.scale();
+        self.painter.write(size, x + offset, y + offset, text, self.shadow.fade(color.a.to_unit()));
+        self.painter.write(size, x, y, text, color);
+    }
+
+    pub fn shadowed_centered(size: TextSize, center: f32, y: f32, text: string, color: Color) {
+        self.shadowed(size, center - self.painter.measure(size, text) / 2, y, text, color);
+    }
+
+    pub fn shadowed_wave(size: TextSize, center: f32, y: f32, text: string, color: Color, offset: i32 = 0) {
+        let letters = text.chars();
+        let width = 8 * size.scale();
+        let left = center - self.painter.measure(size, text) / 2;
+        for at in 0..letters.count {
+            let lift = (Math::Sin(self.clock * 0.004 - (at + offset) * 0.7f32) * size.scale() * 1.2) as f32;
+            self.shadowed(size, left + at * width, y + lift, $"{letters[at]}", color);
+        }
+    }
+
+    // A choice in a menu, centred, in the highlight colour with arrows either
+    // side of it while it is picked.
+    pub fn draw_choice(center: f32, y: f32, label: string, picked: bool, color: Color, highlight: Color) {
+        let mut ink = color;
+        if picked {
+            self.draw_arrows(center, y, self.painter.measure(.medium, label), highlight.fade(self.pulse));
+            ink = highlight;
+        }
+
+        self.shadowed_centered(.medium, center, y, label, ink);
+    }
+
+    // Arrows pointing in at a line of medium text of the given width.
+    pub fn draw_arrows(center: f32, y: f32, width: f32, color: Color) {
+        let reach = width / 2 + 22.0;
+        let middle = y + 11.0;
+        self.painter.triangle(new Point { x: center - reach, y: middle - 9.0 }, new Point { x: center - reach + 12.0, y: middle }, new Point { x: center - reach, y: middle + 9.0 }, color);
+        self.painter.triangle(new Point { x: center + reach, y: middle - 9.0 }, new Point { x: center + reach, y: middle + 9.0 }, new Point { x: center + reach - 12.0, y: middle }, color);
+    }
+
+    // What the buttons for picking and going back do, picking above going back,
+    // with either left out when it does nothing. The buttons line up, and so do
+    // the words after them, ending at the right and with the lower line at y.
+    pub fn draw_legend(right: f32, y: f32, accept: ButtonLabel, accept_words: string, back: ButtonLabel, back_words: string, color: Color) {
+        let mut column: f32 = 0.0;
+        let mut words: f32 = 0.0;
+        if !accept_words.is_empty() {
+            column = accept.width(self.painter, .small);
+            words = self.painter.measure(.small, accept_words);
+        }
+
+        if !back_words.is_empty() {
+            column = Math::Max(column, back.width(self.painter, .small));
+            words = Math::Max(words, self.painter.measure(.small, back_words));
+        }
+
+        let left = right - column - hint_gap() - words;
+        let mut line = y;
+        if !back_words.is_empty() {
+            self.draw_hint(back, back_words, left, line, color, column);
+            line -= 32.0;
+        }
+
+        if !accept_words.is_empty() {
+            self.draw_hint(accept, accept_words, left, line, color, column);
+        }
+    }
+
+    // A button and what it does, with the words after the button, or after the
+    // widest button in a legend so they line up.
+    pub fn draw_hint(button: ButtonLabel, words: string, x: f32, y: f32, color: Color, column: f32 = 0.0) {
+        button.draw(self.painter, x, y, .small, 1.0);
+        self.shadowed(.small, x + Math::Max(column, button.width(self.painter, .small)) + hint_gap(), y, words, color);
+    }
+
+    pub fn hint_width(button: ButtonLabel, words: string) -> f32 {
+        return button.width(self.painter, .small) + hint_gap() + self.painter.measure(.small, words);
+    }
+
+    static fn hint_gap() -> f32 {
+        return 10.0;
+    }
+}

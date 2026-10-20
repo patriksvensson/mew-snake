@@ -1,7 +1,3 @@
-#load "../engine/color.mew"
-#load "../engine/geometry.mew"
-#load "../engine/random.mew"
-#load "../engine/sokol.mew"
 #load "../world/season.mew"
 #load "viewport.mew"
 
@@ -26,7 +22,7 @@ pub type Weather {
     pub static fn new(viewport: Viewport, count: i32) -> Weather {
         let weather = new Weather {
             viewport: viewport,
-            random: new Random { },
+            random: Random::new(),
             x: new f32[count],
             y: new f32[count],
             fall: new f32[count],

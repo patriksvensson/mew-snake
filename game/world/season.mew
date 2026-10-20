@@ -1,5 +1,3 @@
-#load "../engine/color.mew"
-
 use engine;
 
 pub union Season {

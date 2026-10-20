@@ -1,7 +1,6 @@
-#load "../engine/audio.mew"
 #load "../world/game.mew"
 #load "../world/season.mew"
-#load "music.mew"
+#load "tunes.mew"
 
 use engine;
 use system;
@@ -97,7 +96,7 @@ pub type Sounds {
         let speaker = Speaker::open(voices: Voice::all().count);
         return new Sounds {
             speaker: speaker,
-            music: Music::new(speaker, Voice::music.index()),
+            music: Music::new(speaker, Voice::music.index(), Tunes::seasons()),
             bites: bites,
             golden: notes(.square, 0.1, 60.0, 784.0, 988.0, 1175.0, 1568.0).then(Sound::tone(.triangle, 2093.0, 2093.0, 160.0, 0.18)),
             faded: Sound::tone(.triangle, 880.0, 330.0, 280.0, 0.2),

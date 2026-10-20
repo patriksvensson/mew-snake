@@ -1,0 +1,63 @@
+#load "color.mew"
+#load "geometry.mew"
+#load "ring.mew"
+#load "sokol.mew"
+#load "ui.mew"
+
+namespace engine;
+
+use system;
+
+[struct]
+type Popup {
+    pub field at: Point;
+    pub field time: f64;
+    pub field text: string;
+    pub field color: Color;
+    pub field life: f64;
+}
+
+// Words that pop up over the scene, then rise and fade.
+pub type Popups {
+    field items: Ring<Popup>;
+    mut field clock: f64;
+
+    pub static fn new(capacity: i32) -> Popups {
+        return new Popups { items: Ring<Popup>::new(capacity), clock: 0.0 };
+    }
+
+    pub fn update(milliseconds: f64) {
+        self.clock += milliseconds;
+    }
+
+    // When there are too many, the oldest goes to make room.
+    pub fn add(at: Point, text: string, color: Color, life: f64 = 900.0) {
+        self.items.keep(new Popup { at: at, time: self.clock, text: text, color: color, life: life });
+    }
+
+    pub fn clear() {
+        self.items.clear();
+    }
+
+    // Each is kept far enough inside the given edges to be read in full.
+    pub fn draw(ui: Ui, left: f32, right: f32) {
+        // Popups last for different lengths of time, so one that has run out
+        // may still be waiting behind a longer one.
+        while !self.items.is_empty() && self.clock - self.items.first().time > self.items.first().life {
+            self.items.pop_front();
+        }
+
+        for index in 0..self.items.count() {
+            let popup = self.items.get(index);
+            let age = ((self.clock - popup.time) / popup.life) as f32;
+            if age > 1.0 {
+                continue;
+            }
+
+            let rise = 44.0 * (1.0 - (1.0 - age) * (1.0 - age));
+            let reach = ui.painter.measure(.medium, popup.text) / 2;
+            let x = Math::Clamp(popup.at.x, left + reach, right - reach);
+            ui.shadowed_centered(.medium, x, popup.at.y - 34.0 - rise, popup.text, popup.color.fade(1.0 - age * age));
+        }
+    }
+}

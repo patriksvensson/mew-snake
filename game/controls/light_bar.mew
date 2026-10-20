@@ -1,4 +1,3 @@
-#load "../engine/color.mew"
 #load "../scene/palette.mew"
 #load "../world/game.mew"
 #load "input.mew"

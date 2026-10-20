@@ -1,4 +1,3 @@
-#load "../engine/screens.mew"
 #load "../stage.mew"
 
 use engine;
@@ -21,7 +20,7 @@ pub type DissolveScreen {
         let columns = Math::Ceiling((viewport.width - left) / viewport.cell) as i32;
         let rows = Math::Ceiling((viewport.height - top) / viewport.cell) as i32;
 
-        let random = new Random { };
+        let random = Random::new();
         let order = new f32[columns * rows];
         for at in 0..order.count {
             let diagonal = ((at % columns) + (at / columns)) / ((columns + rows - 2) as f32);

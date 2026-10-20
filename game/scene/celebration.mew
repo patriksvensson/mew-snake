@@ -1,7 +1,3 @@
-#load "../engine/color.mew"
-#load "../engine/effects.mew"
-#load "../engine/geometry.mew"
-#load "../engine/random.mew"
 #load "scene.mew"
 
 use engine;
@@ -27,7 +23,7 @@ pub type Celebration {
         let party = new Celebration {
             scene: scene,
             sparks: Sparks::new(400),
-            random: new Random { },
+            random: Random::new(),
             colors: new Color[] { palette.food, palette.orange, palette.gold, palette.leaf, palette.grape, palette.accent, palette.cherry, palette.head },
             x: new f32[count],
             y: new f32[count],

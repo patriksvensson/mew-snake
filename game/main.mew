@@ -1,7 +1,5 @@
+#reference "local:./engine"
 #load "controls/input.mew"
-#load "engine/screens.mew"
-#load "engine/sdl.mew"
-#load "engine/sokol.mew"
 #load "saves/settings.mew"
 #load "scene/scene.mew"
 #load "scene/viewport.mew"
@@ -15,49 +13,17 @@ use engine;
 let board = new Board { };
 let viewport = new Viewport { board: board };
 let settings = Settings::load();
-let opened = Window::open("Mew Snake", viewport.size, fullscreen: settings.is_fullscreen());
+let opened = App::open("Mew Snake", viewport.size, settings.is_fullscreen());
 if let .err(reason) = opened {
     eprintln(reason);
     return 1;
 }
 
-let window = opened.unwrap();
-let painter = Painter::new(window);
-let input = Input::new(window);
-let scene = Scene::new(painter, viewport, input);
+let app = opened.unwrap();
+let input = Input::new(app.window);
+let scene = Scene::new(app.painter, viewport, input);
 let sounds = Sounds::open();
 let stage = Stage::new(board, scene, input, sounds, settings);
-let screens = Screens<Command>::new(TitleScreen::new(stage));
-let clock = Clock::start();
-
-while !screens.is_empty() {
-    for request in input {
-        match request {
-            .command(command) => {
-                screens.handle(command);
-            },
-            .fullscreen => {
-                stage.set_fullscreen(!settings.is_fullscreen());
-            },
-            // However the window goes in or out of full screen, even with its
-            // green button, the setting follows, and the game holds still while
-            // the window changes shape.
-            .turned_fullscreen(on) => {
-                settings.set_fullscreen(on);
-                screens.handle(.suspend);
-            },
-        }
-    }
-
-    let elapsed = clock.tick();
-    screens.update(elapsed);
-    sounds.update(elapsed);
-
-    scene.begin(elapsed);
-    screens.draw();
-    scene.end();
-}
-
+Screens<Command>::new(TitleScreen::new(stage)).run(stage);
 sounds.close();
-painter.shutdown();
-window.close();
+app.close();

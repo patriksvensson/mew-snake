@@ -1,4 +1,3 @@
-#load "../engine/random.mew"
 #load "autopilot.mew"
 #load "board.mew"
 #load "critter.mew"

@@ -10,6 +10,7 @@
 #load "world/board.mew"
 #load "world/game.mew"
 
+use engine;
 use system;
 
 pub type Stage {
@@ -39,7 +40,7 @@ pub type Stage {
             stats: Stats::load(),
             initials: Initials::new(),
             autopilot: Autopilot::new(board),
-            random: new Random { },
+            random: Random::new(),
         };
 
         stage.apply_settings();
@@ -117,5 +118,39 @@ pub type Stage {
 
     pub fn demo() -> Game {
         return Game::demo(self.board, self.random, self.autopilot, self.settings.skin());
+    }
+}
+
+impl Host<Command> for Stage {
+    // However the window goes in or out of full screen, even with its green
+    // button, the setting follows, and the game holds still while the window
+    // changes shape.
+    pub fn read(screens: Screens<Command>) {
+        for request in self.input {
+            match request {
+                .command(command) => {
+                    screens.handle(command);
+                },
+                .fullscreen => {
+                    self.set_fullscreen(!self.settings.is_fullscreen());
+                },
+                .turned_fullscreen(on) => {
+                    self.settings.set_fullscreen(on);
+                    screens.handle(.suspend);
+                },
+            }
+        }
+    }
+
+    pub fn update(milliseconds: f64) {
+        self.sounds.update(milliseconds);
+    }
+
+    pub fn begin(milliseconds: f64) {
+        self.scene.begin(milliseconds);
+    }
+
+    pub fn end() {
+        self.scene.end();
     }
 }

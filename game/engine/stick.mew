@@ -1,0 +1,97 @@
+#load "direction.mew"
+#load "sdl.mew"
+
+namespace engine;
+
+use system;
+
+// A gamepad's left stick, read as one of four directions.
+pub type Stick {
+    mut field gamepad: u32;
+    mut field x: i32;
+    mut field y: i32;
+    mut field aim: Option<Direction>;
+
+    pub static fn new() -> Stick {
+        return new Stick { gamepad: 0, x: 0, y: 0, aim: .none };
+    }
+
+    pub fn tilt(gamepad: u32, axis: Axis, value: i32) {
+        if let .other = axis {
+            return;
+        }
+
+        if gamepad != self.gamepad {
+            if self.aim.is_some() {
+                return;
+            }
+
+            self.gamepad = gamepad;
+            self.x = 0;
+            self.y = 0;
+        }
+
+        match axis {
+            .left_x => {
+                self.x = value;
+            },
+            .left_y => {
+                self.y = value;
+            },
+            .other => { },
+        }
+    }
+
+    pub fn turn() -> Option<Direction> {
+        let press = 16000;
+        let release = 10000;
+        let horizontal = Math::Abs(self.x);
+        let vertical = Math::Abs(self.y);
+        let reach = Math::Max(horizontal, vertical);
+        if reach < release {
+            self.aim = .none;
+            return .none;
+        }
+
+        if reach < press {
+            return .none;
+        }
+
+        // Changing axis takes a clear lean, so a stick held near a diagonal
+        // does not zigzag.
+        let mut sideways = horizontal >= vertical;
+        if let .some(current) = self.aim {
+            if current.dx() != 0 {
+                sideways = vertical * 2 < horizontal * 3;
+            } else {
+                sideways = horizontal * 2 > vertical * 3;
+            }
+        }
+
+        let direction = self.pointing(sideways);
+        if let .some(current) = self.aim {
+            if current.same(direction) {
+                return .none;
+            }
+        }
+
+        self.aim = .some(direction);
+        return .some(direction);
+    }
+
+    fn pointing(sideways: bool) -> Direction {
+        if sideways {
+            if self.x < 0 {
+                return .left;
+            }
+
+            return .right;
+        }
+
+        if self.y < 0 {
+            return .up;
+        }
+
+        return .down;
+    }
+}

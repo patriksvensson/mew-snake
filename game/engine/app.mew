@@ -1,0 +1,29 @@
+#load "geometry.mew"
+#load "screens.mew"
+#load "sdl.mew"
+#load "sokol.mew"
+
+namespace engine;
+
+use system;
+
+// A window and the painter that draws into it.
+pub type App {
+    pub field window: Window;
+    pub field painter: Painter;
+
+    pub static fn open(title: string, size: Size, fullscreen: bool) -> Result<App, string> {
+        let opened = Window::open(title, size, fullscreen: fullscreen);
+        if let .err(reason) = opened {
+            return .err(reason);
+        }
+
+        let window = opened.unwrap();
+        return .ok(new App { window: window, painter: Painter::new(window) });
+    }
+
+    pub fn close() {
+        self.painter.shutdown();
+        self.window.close();
+    }
+}

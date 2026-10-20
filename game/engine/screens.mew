@@ -1,7 +1,18 @@
+#load "sdl.mew"
+
 namespace engine;
 
 use std.collections;
 use system;
+
+// What a game does around its screens each frame: it reads its input into
+// them, keeps its own time, and draws them between a beginning and an end.
+pub interface Host<T> {
+    fn read(screens: Screens<T>);
+    fn update(milliseconds: f64);
+    fn begin(milliseconds: f64);
+    fn end();
+}
 
 pub interface Screen<T> {
     fn handle(command: T) -> Transition<T>;
@@ -66,6 +77,20 @@ pub type Screens<T> {
     pub fn draw() {
         for at in self.base()..self.depth {
             self.stack.get(at).draw();
+        }
+    }
+
+    // Runs until the last screen closes.
+    pub fn run(host: Host<T>) {
+        let clock = Clock::start();
+        while !self.is_empty() {
+            host.read(self);
+            let elapsed = clock.tick();
+            self.update(elapsed);
+            host.update(elapsed);
+            host.begin(elapsed);
+            self.draw();
+            host.end();
         }
     }
 

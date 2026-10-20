@@ -1,4 +1,3 @@
-#load "../engine/ring.mew"
 #load "board.mew"
 #load "game.mew"
 

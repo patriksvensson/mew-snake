@@ -1,7 +1,3 @@
-#load "../engine/color.mew"
-#load "../engine/geometry.mew"
-#load "../engine/random.mew"
-#load "../engine/sokol.mew"
 #load "../scene/palette.mew"
 #load "../scene/viewport.mew"
 #load "board.mew"

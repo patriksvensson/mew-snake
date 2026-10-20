@@ -1,7 +1,3 @@
-#load "../engine/color.mew"
-#load "../engine/geometry.mew"
-#load "../engine/random.mew"
-#load "../engine/sokol.mew"
 #load "../world/season.mew"
 #load "viewport.mew"
 
@@ -22,7 +18,7 @@ pub type Shower {
     pub static fn new(viewport: Viewport) -> Shower {
         let shower = new Shower {
             viewport: viewport,
-            random: new Random { },
+            random: Random::new(),
             x: new f32[80],
             y: new f32[80],
             wait: 0.0,

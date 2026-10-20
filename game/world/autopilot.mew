@@ -3,6 +3,8 @@
 #load "pilot.mew"
 #load "snake.mew"
 
+use engine;
+
 pub type Autopilot {
     field board: Board;
     field directions: Direction[];

@@ -1,6 +1,3 @@
-#load "../engine/color.mew"
-#load "../engine/geometry.mew"
-#load "../engine/sokol.mew"
 #load "../world/game.mew"
 #load "palette.mew"
 #load "viewport.mew"
@@ -19,7 +16,7 @@ pub type Speech {
 
     pub static fn new() -> Speech {
         return new Speech {
-            random: new Random { },
+            random: Random::new(),
             yums: new string[] { "YUM!", "NOM!", "TASTY!", "MMM!" },
             said: "",
             said_at: 0.0,

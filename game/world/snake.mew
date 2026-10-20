@@ -1,8 +1,3 @@
-#load "../engine/color.mew"
-#load "../engine/geometry.mew"
-#load "../engine/random.mew"
-#load "../engine/ring.mew"
-#load "../engine/sokol.mew"
 #load "../scene/palette.mew"
 #load "../scene/scene.mew"
 #load "../scene/skin.mew"
@@ -170,7 +165,7 @@ type SnakeView {
             viewport: scene.viewport,
             points: new Point[points],
             colors: new Color[points],
-            random: new Random { },
+            random: Random::new(),
             blinking: scene.clock() + 2000.0,
             licking: scene.clock() + 3500.0,
         };

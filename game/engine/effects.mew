@@ -24,7 +24,7 @@ pub type Sparks {
             dy: new f32[capacity],
             life: new f32[capacity],
             colors: new Color[capacity],
-            random: new Random { },
+            random: Random::new(),
             next: 0,
         };
     }
